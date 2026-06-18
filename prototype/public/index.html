@@ -1893,6 +1893,147 @@
       will-change: transform;
     }
     .ticker:hover .ticker-track { animation-play-state: paused; }
+
+    .page-nav {
+      display: flex;
+      gap: 4px;
+      padding: 12px 24px 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-primary);
+    }
+
+    .page-nav-tab {
+      background: transparent;
+      color: var(--text-secondary);
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 10px 18px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .page-nav-tab:hover { color: var(--text-primary); }
+
+    .page-nav-tab.active {
+      color: var(--text-primary);
+      border-bottom-color: var(--stellar-blue);
+    }
+
+    .rwa-page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .rwa-page-title {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .rwa-page-subtitle {
+      color: var(--text-muted);
+      font-size: 14px;
+      margin-bottom: 28px;
+    }
+
+    .rwa-category {
+      margin-bottom: 32px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .rwa-category-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .rwa-category-name {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .rwa-category-count {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .rwa-category-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      padding: 10px 20px 0;
+    }
+
+    .rwa-asset-row {
+      display: grid;
+      grid-template-columns: 110px 1fr 220px;
+      gap: 16px;
+      align-items: center;
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 14px;
+    }
+
+    .rwa-asset-row:first-of-type { border-top: none; }
+
+    .rwa-asset-code {
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .rwa-asset-issuer {
+      color: var(--text-secondary);
+    }
+
+    .rwa-asset-notes {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .rwa-asset-address {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      text-align: right;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .rwa-asset-kind-badge {
+      display: inline-block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--bg-secondary);
+      color: var(--text-muted);
+      margin-left: 6px;
+    }
+
+    .rwa-empty-category {
+      padding: 16px 20px;
+      color: var(--text-muted);
+      font-style: italic;
+      font-size: 13px;
+    }
+
+    @media (max-width: 720px) {
+      .rwa-asset-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
+      .rwa-asset-address { text-align: left; }
+    }
     @keyframes tickerScroll {
       from { transform: translateX(0); }
       to   { transform: translateX(-50%); }
@@ -2053,6 +2194,12 @@
     <div class="ticker-loading">Loading prices…</div>
   </div>
 
+  <!-- Top-level page nav. Hash routing keeps this purely client-side. -->
+  <nav class="page-nav" id="pageNav">
+    <button class="page-nav-tab active" data-page="portfolio" onclick="switchPage('portfolio')">Portfolio</button>
+    <button class="page-nav-tab" data-page="rwas" onclick="switchPage('rwas')">RWAs</button>
+  </nav>
+
   <div class="main" id="app">
     <div class="welcome" id="welcomeState">
       <h1 style="display:flex;align-items:center;gap:16px;justify-content:center;">
@@ -2154,6 +2301,112 @@
       loadPortfolio();
     }
 
+    // ── Top-level page nav (Portfolio / RWAs) ─────────────────
+    async function switchPage(page) {
+      if (page !== "portfolio" && page !== "rwas") page = "portfolio";
+      currentPage = page;
+
+      // Update tab styles
+      document.querySelectorAll(".page-nav-tab").forEach((t) => {
+        t.classList.toggle("active", t.getAttribute("data-page") === page);
+      });
+
+      // Update URL hash without scrolling
+      const newHash = page === "rwas" ? "#/rwas" : "";
+      if (location.hash !== newHash) {
+        history.replaceState(null, "", location.pathname + location.search + newHash);
+      }
+
+      if (page === "rwas") {
+        await renderRwasPage();
+      } else {
+        // Restore the welcome screen / portfolio view
+        const app = document.getElementById("app");
+        app.innerHTML = WELCOME_HTML;
+        // Re-trigger leaderboard load since DOM was replaced
+        loadWhales();
+        loadPortfolioWhales();
+      }
+    }
+
+    async function renderRwasPage() {
+      const app = document.getElementById("app");
+      if (!rwaCatalog) {
+        app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="rwa-page-subtitle">Loading catalog…</div></div>`;
+        try {
+          const res = await fetch("/rwa-catalog.json");
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          rwaCatalog = await res.json();
+        } catch (e) {
+          app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="error-banner">Failed to load catalog: ${e.message}</div></div>`;
+          return;
+        }
+      }
+
+      const categories = (rwaCatalog.categories || []);
+      const total = categories.reduce((s, c) => s + (c.assets?.length || 0), 0);
+
+      let html = `
+        <div class="rwa-page">
+          <div class="rwa-page-title">Real-World Assets on Stellar</div>
+          <div class="rwa-page-subtitle">${total} asset${total !== 1 ? "s" : ""} across ${categories.length} categor${categories.length !== 1 ? "ies" : "y"}. Curated list — <a href="https://github.com/kebkoether/moonshot_bank/blob/main/prototype/public/rwa-catalog.json" target="_blank" rel="noopener" style="color:var(--stellar-blue);">edit on GitHub</a>.</div>
+      `;
+
+      for (const cat of categories) {
+        const count = (cat.assets || []).length;
+        html += `
+          <div class="rwa-category">
+            <div class="rwa-category-header">
+              <div class="rwa-category-name">${escapeHtml(cat.name)}</div>
+              <div class="rwa-category-count">${count} asset${count !== 1 ? "s" : ""}</div>
+            </div>
+            ${cat.description ? `<div class="rwa-category-desc">${escapeHtml(cat.description)}</div>` : ""}
+        `;
+
+        if (count === 0) {
+          html += `<div class="rwa-empty-category">No assets yet — add issuer addresses to rwa-catalog.json.</div>`;
+        } else {
+          for (const a of cat.assets) {
+            const isSoroban = !!a.contractId;
+            const address = a.issuer || a.contractId || "";
+            const kindBadge = isSoroban
+              ? `<span class="rwa-asset-kind-badge">Soroban</span>`
+              : `<span class="rwa-asset-kind-badge">Classic</span>`;
+            html += `
+              <div class="rwa-asset-row">
+                <div class="rwa-asset-code">${escapeHtml(a.code)}${kindBadge}</div>
+                <div>
+                  <div class="rwa-asset-issuer">${escapeHtml(a.issuerName || "Unknown issuer")}</div>
+                  ${a.notes ? `<div class="rwa-asset-notes">${escapeHtml(a.notes)}</div>` : ""}
+                </div>
+                <div class="rwa-asset-address" title="${escapeHtml(address)}">${escapeHtml(address)}</div>
+              </div>
+            `;
+          }
+        }
+
+        html += `</div>`;
+      }
+
+      html += `</div>`;
+      app.innerHTML = html;
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[c]);
+    }
+
+    window.addEventListener("hashchange", () => {
+      const page = location.hash === "#/rwas" ? "rwas" : "portfolio";
+      if (page !== currentPage) switchPage(page);
+    });
+
     // ── State ──────────────────────────────────────────────────
     let currentData = null;
     let currentTab = "tokens";
@@ -2172,6 +2425,10 @@
     let multiWalletMode = false;   // Whether we're in portfolio mode
     let timeTravelDate = null;      // null = live, ISO string = historical
     let timeTravelSnapshot = null;  // Snapshot data when viewing historical
+
+    // Top-level page routing. Hash-based so it works on any static host.
+    let currentPage = "portfolio";       // "portfolio" | "rwas"
+    let rwaCatalog = null;                // Cached fetch of rwa-catalog.json
 
     const API_BASE = window.location.origin;
     const WELCOME_HTML = document.getElementById("app").innerHTML; // Save initial welcome screen
@@ -2389,6 +2646,11 @@
     }
 
     window.addEventListener("load", () => {
+      // Honor deep-links to #/rwas immediately, before the welcome leaderboards load.
+      if (location.hash === "#/rwas") {
+        switchPage("rwas");
+        return;
+      }
       setTimeout(() => {
         loadWhales();
         loadPortfolioWhales();

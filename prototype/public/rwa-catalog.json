@@ -1,0 +1,148 @@
+{
+  "_note": "Issuer addresses and contract IDs are sourced from prototype/lib/tracked-assets.js (used in production). Empty categories are placeholders — fill in when verified issuers are known. To add an asset: pick the right category, add an entry with code/issuer (classic) or contractId (Soroban), issuerName, and optional notes.",
+  "categories": [
+    {
+      "id": "mmf",
+      "name": "Money Market Funds",
+      "description": "Tokenized shares of regulated money market funds.",
+      "assets": [
+        {
+          "code": "BENJI",
+          "issuer": "GBHNGLLIE3KWGKCHIKMHJ5HVZHYIK7WTBE4QF5PLAKL4CJGSEU7HZIW5",
+          "issuerName": "Franklin Templeton",
+          "notes": "Franklin OnChain U.S. Government Money Fund"
+        }
+      ]
+    },
+    {
+      "id": "treasuries",
+      "name": "Tokenized Treasuries",
+      "description": "Tokenized government debt instruments.",
+      "assets": [
+        {
+          "code": "USDY",
+          "issuer": "GAJMPX5NBOG6TQFPQGRABJEEB2YE7RFRLUKJDZAZGAD5GFX4J7TADAZ6",
+          "issuerName": "Ondo Finance",
+          "notes": "Yield-bearing USD"
+        },
+        {
+          "code": "CETES",
+          "issuer": "GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC",
+          "issuerName": "Etherfuse",
+          "notes": "Mexican government T-bills (MXN-denominated)"
+        },
+        {
+          "code": "EUTBL",
+          "contractId": "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF",
+          "issuerName": "Spiko",
+          "notes": "EU T-bills (EUR-denominated, Soroban)"
+        },
+        {
+          "code": "UKTBL",
+          "contractId": "CDT3KU6TQZNOHKNOHNAFFDQZDURVC3MSTL4ML7TUTZGNOPBZCLABP4FR",
+          "issuerName": "Spiko",
+          "notes": "UK T-bills (GBP-denominated, Soroban)"
+        }
+      ]
+    },
+    {
+      "id": "private-credit",
+      "name": "Private Credit",
+      "description": "Tokenized private debt and credit instruments.",
+      "assets": []
+    },
+    {
+      "id": "tokenized-gold",
+      "name": "Tokenized Gold",
+      "description": "Tokens backed by physical gold.",
+      "assets": []
+    },
+    {
+      "id": "tokenized-btc",
+      "name": "Tokenized Bitcoin",
+      "description": "BTC-denominated tokens on Stellar.",
+      "assets": [
+        {
+          "code": "SOLVBTC",
+          "contractId": "CBIJBDNZNF4X35BJ4FFZWCDBSCKOP5NB4PLG4SNENRMLAPYG4P5FM6VN",
+          "issuerName": "Solv Protocol",
+          "notes": "Bitcoin-denominated (Soroban)"
+        },
+        {
+          "code": "XSOLVBTC",
+          "contractId": "CAUP7NFABXE5TJRL3FKTPMWRLC7IAXYDCTHQRFSCLR5TMGKHOOQO772J",
+          "issuerName": "Solv Protocol",
+          "notes": "SolvBTC.BBN (Soroban)"
+        }
+      ]
+    },
+    {
+      "id": "stablecoins",
+      "name": "Fiat-anchored Stablecoins",
+      "description": "Tokens redeemable 1:1 for off-chain fiat reserves.",
+      "assets": [
+        {
+          "code": "USDC",
+          "contractId": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+          "issuerName": "Circle",
+          "notes": "USD-anchored (Soroban SAC)"
+        },
+        {
+          "code": "PYUSD",
+          "contractId": "CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2",
+          "issuerName": "PayPal / Paxos",
+          "notes": "USD-anchored (Soroban)"
+        },
+        {
+          "code": "EURC",
+          "issuer": "GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPP2",
+          "issuerName": "Circle",
+          "notes": "EUR-anchored"
+        },
+        {
+          "code": "EURAU",
+          "contractId": "CB44W727WSLHPXJ47A6DHF5D34RKWSOZAMEDXO3CF5TEEEQ2ZX4V3VRI",
+          "issuerName": "AllUnity",
+          "notes": "EUR-anchored (Soroban)"
+        },
+        {
+          "code": "EURCV",
+          "contractId": "CANKBYNNAYKEZXLB655F2UPNTAZFK5HILZUXL7ZTFR3NF6LKDSVY7KFH",
+          "issuerName": "SG Forge",
+          "notes": "EUR-anchored (Soroban)"
+        }
+      ]
+    },
+    {
+      "id": "crypto-native",
+      "name": "Crypto Native",
+      "description": "Stellar-ecosystem governance and utility tokens.",
+      "assets": [
+        {
+          "code": "BLND",
+          "issuer": "GDJEHTBE6ZHUXSWFI642DCGLUOECLHPF3KSXHPXTSTJ7E3JF6MQ5EZYY",
+          "issuerName": "Blend Protocol",
+          "notes": "Lending protocol governance"
+        },
+        {
+          "code": "AQUA",
+          "issuer": "GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA",
+          "issuerName": "Aquarius",
+          "notes": "AMM rewards token"
+        },
+        {
+          "code": "YBX",
+          "issuer": "GBUYYBXWCLT2MOSSHRFCKMEDFOVSCAXNIEW424GLN666OEXHAAWBDYMX",
+          "issuerName": "YieldBlox",
+          "notes": "Lending protocol governance"
+        },
+        {
+          "code": "SHX",
+          "issuer": "GDSTRSHXHGJ7ZIVRBXEYE5Q74XUVCUSEKEBR7UCHEUUEK72N7I7KJ6JH",
+          "issuerName": "Stronghold",
+          "notes": "Exchange ecosystem token"
+        }
+      ]
+    }
+  ]
+}
