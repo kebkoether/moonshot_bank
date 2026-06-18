@@ -81,6 +81,94 @@
               "url": "https://app.etherfuse.com"
             }
           ]
+        },
+        {
+          "code": "YLDS",
+          "issuer": "GAC7MOPTQLQUM3KC24AW4GHS3RLF72LPEZO54AH7EZ6TSMGRB5SOAVH3",
+          "issuerName": "Figure Markets",
+          "issuerUrl": "https://www.figuremarkets.com/ylds",
+          "description": "SEC-registered yield-bearing security token issued by Figure Certificate Company. Pays interest while functioning as a transferable cash-equivalent; native on Provenance, bridged to Stellar.",
+          "notes": "SEC-registered yield-bearing security",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "Figure Markets",
+              "url": "https://www.figuremarkets.com/ylds"
+            },
+            {
+              "name": "StellarX (YLDS/USDC)",
+              "url": "https://www.stellarx.com/markets/YLDS-GAC7MOPTQLQUM3KC24AW4GHS3RLF72LPEZO54AH7EZ6TSMGRB5SOAVH3/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius (USDC → YLDS)",
+              "url": "https://aqua.network/swap/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/YLDS:GAC7MOPTQLQUM3KC24AW4GHS3RLF72LPEZO54AH7EZ6TSMGRB5SOAVH3/"
+            }
+          ]
+        },
+        {
+          "code": "JTRSY",
+          "contractId": "CBHOEKLWTB6HR2A3IXHIIMQG5FOXWXS6EG4Q5YJDRPMXPCX7M24CYR2O",
+          "issuerName": "Centrifuge / Anemoy",
+          "issuerUrl": "https://centrifuge.io",
+          "description": "Tokenized BVI professional fund holding short-dated U.S. T-Bills (0–3 month maturity). Daily liquidity in USDC. Allowlist-gated transfers — see deJTRSY for the permissionless DeFi wrapper.",
+          "notes": "U.S. T-Bills via Anemoy fund (Soroban, allowlist)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "Centrifuge App",
+              "url": "https://app.centrifuge.io"
+            }
+          ]
+        },
+        {
+          "code": "deJTRSY",
+          "contractId": "CBI7UCH5KGSVQRO5H4SUCZUTZABCITZLRHQQZTWL2TK4RZ72TAR6IHRV",
+          "issuerName": "Open Market Foundation / Centrifuge",
+          "issuerUrl": "https://centrifuge.io",
+          "description": "DeFi-wrapped, permissionless version of JTRSY. Same short-dated U.S. T-Bill exposure but interoperable with DeFi protocols (Blend, etc.) without the per-holder allowlist gate.",
+          "notes": "deJTRSY — DeFi-wrapped JTRSY",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "Centrifuge App",
+              "url": "https://app.centrifuge.io"
+            },
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            }
+          ]
+        },
+        {
+          "code": "USTBL",
+          "contractId": "CARUUX2FZNPH6DGJOEUFSIUQWYHNL5AVDV7PMVSHWL7OBYIBFC76F4TO",
+          "issuerName": "Spiko",
+          "issuerUrl": "https://www.spiko.io",
+          "description": "Spiko US T-Bills Money Market Fund — EU-regulated short-term VNAV MMF investing 100% in U.S. T-Bills and repo. Distributed on Stellar via Soroban; daily NAV.",
+          "notes": "U.S. T-bills MMF (USD-denominated, Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "Spiko App",
+              "url": "https://app.spiko.io"
+            },
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            }
+          ]
         }
       ]
     },
@@ -167,7 +255,48 @@
       "id": "private-credit",
       "name": "Private Credit",
       "description": "Tokenized private debt and credit instruments.",
-      "assets": []
+      "assets": [
+        {
+          "code": "JAAA",
+          "contractId": "CDV6U7OEVY6KUEJ4WNS63AYB6RFU3BAE7AZJOQ7LPH447C6NWUXEZZSO",
+          "issuerName": "Centrifuge / Janus Henderson Anemoy",
+          "issuerUrl": "https://centrifuge.io",
+          "description": "Tokenized share class of the Janus Henderson Anemoy AAA CLO Fund — exposure to high-grade, floating-rate collateralized loan obligations. Daily USDC subscriptions/redemptions. Allowlist-gated transfers — see deJAAA for the DeFi-wrapped variant.",
+          "notes": "AAA-rated CLO fund (Soroban, allowlist)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "Centrifuge App",
+              "url": "https://app.centrifuge.io"
+            }
+          ]
+        },
+        {
+          "code": "deJAAA",
+          "contractId": "CC64WBDGS6QQP22QTTIACYIXT3WF7BBQEYOQPLTP7GTKYY7PZ74QYGSL",
+          "issuerName": "Open Market Foundation / Centrifuge",
+          "issuerUrl": "https://centrifuge.io",
+          "description": "DeFi-wrapped, permissionless version of JAAA. Same underlying AAA CLO exposure but transferable in DeFi protocols without a per-holder allowlist.",
+          "notes": "deJAAA — DeFi-wrapped JAAA",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "Centrifuge App",
+              "url": "https://app.centrifuge.io"
+            },
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "tokenized-gold",

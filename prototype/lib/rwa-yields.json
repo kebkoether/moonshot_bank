@@ -49,6 +49,42 @@
       "marketCap": null,
       "asOf": null,
       "source": null
+    },
+    "ylds-gac7mo": {
+      "yield7d": null,
+      "marketCap": "$25M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (Stellar supply)"
+    },
+    "jtrsy-cbhoek": {
+      "yield7d": "3.45%",
+      "marketCap": "$4.5M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (Stellar supply, fund APY)"
+    },
+    "dejtrsy-cbi7uc": {
+      "yield7d": "3.45%",
+      "marketCap": "$4.9M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (Stellar supply, fund APY)"
+    },
+    "ustbl-caruux": {
+      "yield7d": "3.46%",
+      "marketCap": "$47.6M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (Stellar supply)"
+    },
+    "jaaa-cdv6u7": {
+      "yield7d": "2.46%",
+      "marketCap": "$4.9M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (Stellar supply, fund APY)"
+    },
+    "dejaaa-cc64wb": {
+      "yield7d": "2.45%",
+      "marketCap": "$4.9M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (Stellar supply, fund APY)"
     }
   }
 }
