@@ -750,6 +750,51 @@
       color: var(--text-muted);
     }
 
+    .portfolio-switcher {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .portfolio-select {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      max-width: 180px;
+    }
+
+    .portfolio-btn {
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .portfolio-btn:hover {
+      background: var(--bg-hover, var(--border));
+      color: var(--text-primary);
+    }
+
+    .portfolio-btn[disabled] {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
     .wallet-list {
       display: flex;
       flex-direction: column;
@@ -2350,18 +2395,131 @@
     });
 
     // ── Multi-Wallet Management ────────────────────────────────
+    // Portfolios live in localStorage. Server-side /api/v1/wallets is no
+    // longer used by the UI — the portfolio API takes raw addresses, so all
+    // CRUD happens in the browser. On first run we migrate any existing
+    // server-tracked wallets into a default "Main" portfolio.
 
-    async function loadWalletList() {
+    const PORTFOLIO_STORE_KEY = "stellarscope.portfolios.v1";
+
+    function readPortfolioStore() {
+      try {
+        const raw = localStorage.getItem(PORTFOLIO_STORE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.portfolios) || parsed.portfolios.length === 0) return null;
+        return parsed;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function writePortfolioStore(store) {
+      try {
+        localStorage.setItem(PORTFOLIO_STORE_KEY, JSON.stringify(store));
+      } catch (e) {
+        console.error("Failed to save portfolios:", e);
+      }
+    }
+
+    function newPortfolioId() {
+      return "p_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+    }
+
+    function getActivePortfolio() {
+      const store = readPortfolioStore();
+      if (!store) return null;
+      return store.portfolios.find((p) => p.id === store.activeId) || store.portfolios[0];
+    }
+
+    async function ensurePortfolioStore() {
+      let store = readPortfolioStore();
+      if (store) {
+        // Make sure activeId is valid
+        if (!store.portfolios.some((p) => p.id === store.activeId)) {
+          store.activeId = store.portfolios[0].id;
+          writePortfolioStore(store);
+        }
+        return store;
+      }
+
+      // First-time migration from server-tracked wallets
+      let seedWallets = [];
       try {
         const res = await fetch(`${API_BASE}/api/v1/wallets`);
-        if (!res.ok) throw new Error("Failed to load wallets");
-        const data = await res.json();
-        walletList = data.wallets || [];
-        return walletList;
-      } catch (e) {
-        console.error("Load wallet list error:", e);
-        return [];
+        if (res.ok) {
+          const data = await res.json();
+          seedWallets = (data.wallets || []).map((w) => ({
+            address: w.address,
+            label: w.label || null,
+          }));
+        }
+      } catch (e) { /* start empty */ }
+
+      const id = newPortfolioId();
+      store = {
+        activeId: id,
+        portfolios: [{ id, name: "Main", wallets: seedWallets }],
+      };
+      writePortfolioStore(store);
+      return store;
+    }
+
+    async function createPortfolio() {
+      const name = (prompt("Name your new portfolio:") || "").trim();
+      if (!name) return;
+      const store = (await ensurePortfolioStore());
+      const portfolio = { id: newPortfolioId(), name, wallets: [] };
+      store.portfolios.push(portfolio);
+      store.activeId = portfolio.id;
+      writePortfolioStore(store);
+      walletList = [];
+      activeView = "all";
+      await loadMultiWalletPortfolio();
+    }
+
+    async function renameActivePortfolio() {
+      const store = await ensurePortfolioStore();
+      const active = store.portfolios.find((p) => p.id === store.activeId) || store.portfolios[0];
+      const name = (prompt("Rename portfolio:", active.name) || "").trim();
+      if (!name || name === active.name) return;
+      active.name = name;
+      writePortfolioStore(store);
+      await loadMultiWalletPortfolio();
+    }
+
+    async function deleteActivePortfolio() {
+      const store = await ensurePortfolioStore();
+      const active = store.portfolios.find((p) => p.id === store.activeId) || store.portfolios[0];
+      if (!confirm(`Delete portfolio "${active.name}"? This cannot be undone.`)) return;
+
+      store.portfolios = store.portfolios.filter((p) => p.id !== active.id);
+      if (store.portfolios.length === 0) {
+        store.portfolios.push({ id: newPortfolioId(), name: "Main", wallets: [] });
       }
+      store.activeId = store.portfolios[0].id;
+      writePortfolioStore(store);
+      walletList = store.portfolios[0].wallets.map((w) => ({ address: w.address, label: w.label }));
+      activeView = "all";
+      await loadMultiWalletPortfolio();
+    }
+
+    async function switchPortfolio(id) {
+      const store = await ensurePortfolioStore();
+      const p = store.portfolios.find((pp) => pp.id === id);
+      if (!p) return;
+      store.activeId = id;
+      writePortfolioStore(store);
+      walletList = p.wallets.map((w) => ({ address: w.address, label: w.label }));
+      activeView = "all";
+      await loadMultiWalletPortfolio();
+    }
+
+    async function loadWalletList() {
+      const store = await ensurePortfolioStore();
+      const active = store.portfolios.find((p) => p.id === store.activeId) || store.portfolios[0];
+      walletList = (active.wallets || []).map((w) => ({ address: w.address, label: w.label }));
+      return walletList;
     }
 
     async function addWalletToPortfolio(address, label) {
@@ -2369,34 +2527,29 @@
         alert("Invalid Stellar address");
         return false;
       }
-      try {
-        const res = await fetch(`${API_BASE}/api/v1/wallets`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ address, network: currentNetwork, label: label || null }),
-        });
-        if (!res.ok) throw new Error("Failed to add wallet");
-        const data = await res.json();
-        walletList = data.wallets || [];
-        return true;
-      } catch (e) {
-        alert("Failed to add wallet: " + e.message);
+      const store = await ensurePortfolioStore();
+      const active = store.portfolios.find((p) => p.id === store.activeId) || store.portfolios[0];
+      if (active.wallets.some((w) => w.address === address)) {
+        alert("This wallet is already in the current portfolio.");
         return false;
       }
+      active.wallets.push({ address, label: label || null });
+      writePortfolioStore(store);
+      walletList = active.wallets.map((w) => ({ address: w.address, label: w.label }));
+      return true;
     }
 
     async function removeWalletFromPortfolio(address, evt) {
       if (evt) evt.stopPropagation();
-      if (!confirm("Remove this wallet from your portfolio?")) return;
-      try {
-        const res = await fetch(`${API_BASE}/api/v1/wallets/${address}`, { method: "DELETE" });
-        if (!res.ok) throw new Error("Failed to remove wallet");
-        const data = await res.json();
-        walletList = data.wallets || [];
-        await loadMultiWalletPortfolio();
-      } catch (e) {
-        alert("Failed to remove: " + e.message);
-      }
+      const store = await ensurePortfolioStore();
+      const active = store.portfolios.find((p) => p.id === store.activeId) || store.portfolios[0];
+      const target = active.wallets.find((w) => w.address === address);
+      const label = target?.label || shortenAddr(address);
+      if (!confirm(`Remove ${label} from "${active.name}"?`)) return;
+      active.wallets = active.wallets.filter((w) => w.address !== address);
+      writePortfolioStore(store);
+      walletList = active.wallets.map((w) => ({ address: w.address, label: w.label }));
+      await loadMultiWalletPortfolio();
     }
 
     async function handleAddWallet() {
@@ -2450,11 +2603,27 @@
       const d = portfolioData;
       if (!d) return;
 
-      // Wallet panel
+      // Wallet panel — portfolio switcher + wallet list
+      const _store = readPortfolioStore();
+      const _portfolios = _store ? _store.portfolios : [];
+      const _activeId = _store ? _store.activeId : "";
+      const _optionsHTML = _portfolios.map((p) => {
+        const sel = p.id === _activeId ? " selected" : "";
+        const safe = p.name.replace(/</g, "&lt;");
+        return `<option value="${p.id}"${sel}>${safe}</option>`;
+      }).join("");
+
       let walletPanelHTML = `
         <div class="wallet-panel">
           <div class="wallet-panel-header">
-            <div class="wallet-panel-title">My Wallets</div>
+            <div class="portfolio-switcher">
+              <select class="portfolio-select" onchange="switchPortfolio(this.value)" title="Switch portfolio">
+                ${_optionsHTML}
+              </select>
+              <button class="portfolio-btn" onclick="createPortfolio()" title="New portfolio">+</button>
+              <button class="portfolio-btn" onclick="renameActivePortfolio()" title="Rename portfolio">&#x270E;</button>
+              <button class="portfolio-btn" onclick="deleteActivePortfolio()" title="Delete portfolio">&#x1F5D1;</button>
+            </div>
             <div class="wallet-panel-count">${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""}</div>
           </div>
           <div class="wallet-list">
@@ -2985,19 +3154,36 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         activeView = "all";
         await loadMultiWalletPortfolio();
       } else {
-        // Show the welcome with add-wallet prompt
+        // Empty active portfolio — still show the switcher so the user can
+        // create/switch/delete portfolios without first adding a wallet.
         multiWalletMode = true;
+        const store = await ensurePortfolioStore();
+        const activePortfolioName =
+          (store.portfolios.find((p) => p.id === store.activeId) || store.portfolios[0]).name;
+        const optionsHTML = store.portfolios.map((p) => {
+          const sel = p.id === store.activeId ? " selected" : "";
+          const safe = p.name.replace(/</g, "&lt;");
+          return `<option value="${p.id}"${sel}>${safe}</option>`;
+        }).join("");
+
         const app = document.getElementById("app");
         app.innerHTML = `
           <div class="wallet-panel">
             <div class="wallet-panel-header">
-              <div class="wallet-panel-title">My Portfolio</div>
+              <div class="portfolio-switcher">
+                <select class="portfolio-select" onchange="switchPortfolio(this.value)" title="Switch portfolio">
+                  ${optionsHTML}
+                </select>
+                <button class="portfolio-btn" onclick="createPortfolio()" title="New portfolio">+</button>
+                <button class="portfolio-btn" onclick="renameActivePortfolio()" title="Rename portfolio">&#x270E;</button>
+                <button class="portfolio-btn" onclick="deleteActivePortfolio()" title="Delete portfolio">&#x1F5D1;</button>
+              </div>
             </div>
             <div style="text-align:center; padding: 40px 20px; color: var(--text-secondary);">
               <div style="font-size: 40px; margin-bottom: 16px;">&#x1F4BC;</div>
-              <div style="font-size: 16px; margin-bottom: 8px;">No wallets yet</div>
+              <div style="font-size: 16px; margin-bottom: 8px;">No wallets in "${activePortfolioName.replace(/</g, "&lt;")}"</div>
               <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 24px; max-width: 400px; margin-left: auto; margin-right: auto;">
-                Add your Stellar wallets to track your combined portfolio, or connect Freighter to get started.
+                Add Stellar wallets to this portfolio, switch to a different portfolio above, or connect Freighter.
               </div>
             </div>
             <div class="wallet-add-form">
