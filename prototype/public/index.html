@@ -82,12 +82,30 @@
       rabet: RABET_ID,
     };
 
+    const CONNECTED_ADDR_KEY = "stellarscope.connectedWallet";
+
+    function setConnectedButtonState(address) {
+      const btn = document.getElementById("headerWalletBtn");
+      if (!btn) return;
+      btn.classList.add("connected");
+      btn.title = address;
+      btn.innerHTML = `
+        <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+        </svg>
+        ${address.slice(0, 4)}…${address.slice(-4)}
+      `;
+    }
+
     async function connectAndAdd(address, label) {
       if (typeof window.addWalletToPortfolio !== "function") {
         alert("App not ready yet — try again in a moment.");
         return;
       }
       if (await window.addWalletToPortfolio(address, label || null)) {
+        try { localStorage.setItem(CONNECTED_ADDR_KEY, address); } catch (e) {}
+        setConnectedButtonState(address);
         if (typeof window.enterPortfolioMode === "function") {
           await window.enterPortfolioMode();
         }
@@ -116,6 +134,19 @@
         alert("Could not connect: " + msg);
       }
     };
+
+    // On page load, if a connected address was remembered, restore the
+    // visual state so the button doesn't claim "Connect Wallet" after a
+    // refresh. The kit itself doesn't expose a "stay-signed-in" hook, so
+    // this is a thin UX layer — the user can still re-connect if needed.
+    document.addEventListener("DOMContentLoaded", () => {
+      try {
+        const saved = localStorage.getItem(CONNECTED_ADDR_KEY);
+        if (saved && /^G[A-Z2-7]{55}$/.test(saved)) {
+          setConnectedButtonState(saved);
+        }
+      } catch (e) {}
+    });
   </script>
   <style>
     /* Dark theme (default) and light theme.
@@ -2433,7 +2464,7 @@
     </div>
     <div class="header-right">
       <button class="btn btn-secondary" onclick="enterPortfolioMode()" style="font-size:13px; padding: 10px 18px;">My Portfolio</button>
-      <button class="wallet-btn" onclick="connectWalletViaModal()">
+      <button class="wallet-btn" id="headerWalletBtn" onclick="connectWalletViaModal()">
         <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="6" width="20" height="12" rx="2"></rect>
           <path d="M22 10H2"></path>
@@ -4446,7 +4477,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         html += `<div class="defi-summary-stat"><div class="label">Borrowed</div><div class="value">${fmtUSD(totalBorrowed)}</div></div>`;
         html += `<div class="defi-summary-stat"><div class="label">Net DeFi</div><div class="value ${netDefiTotal < 0 ? "negative" : "positive"}">${fmtUSD(netDefiTotal)}</div></div>`;
         if (totalPendingBlnd > 0) {
-          html += `<div class="defi-summary-stat"><div class="label">Pending BLND</div><div class="value">${fmt(totalPendingBlnd, 4)}</div></div>`;
+          html += `<div class="defi-summary-stat"><div class="label">Pending BLND</div><div class="value">${fmt(totalPendingBlnd, 2)}</div></div>`;
         }
         html += `</div>`;
       }
@@ -4491,7 +4522,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
           html += `<td class="right">`;
           if (row.supplied > 0) {
-            html += `${fmt(row.supplied, 4)} ${row.asset}<br><span class="muted">${fmtUSD(row.suppliedUSD)}</span>`;
+            html += `${fmt(row.supplied, 2)} ${row.asset}<br><span class="muted">${fmtUSD(row.suppliedUSD)}</span>`;
           } else {
             html += `<span class="muted">—</span>`;
           }
@@ -4499,7 +4530,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
           html += `<td class="right">`;
           if (row.borrowed > 0) {
-            html += `<span class="negative">${fmt(row.borrowed, 4)} ${row.asset}</span><br><span class="muted">${fmtUSD(row.borrowedUSD)}</span>`;
+            html += `<span class="negative">${fmt(row.borrowed, 2)} ${row.asset}</span><br><span class="muted">${fmtUSD(row.borrowedUSD)}</span>`;
           } else {
             html += `<span class="muted">—</span>`;
           }
@@ -4532,7 +4563,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         }
         const footerRight = [];
         if (group.totalPendingBlnd > 0) {
-          footerRight.push(`<span class="emission-pill">+${fmt(group.totalPendingBlnd, 4)} BLND pending</span>`);
+          footerRight.push(`<span class="emission-pill">+${fmt(group.totalPendingBlnd, 2)} BLND pending</span>`);
         }
         if (footerLeft.length > 0 || footerRight.length > 0) {
           html += `<div class="defi-pool-footer">`;
