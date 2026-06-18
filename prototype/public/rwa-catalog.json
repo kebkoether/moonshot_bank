@@ -248,6 +248,30 @@
               "url": "https://app.spiko.io"
             }
           ]
+        },
+        {
+          "code": "SAFO",
+          "contractId": "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX",
+          "issuerName": "Spiko",
+          "issuerUrl": "https://www.spiko.io",
+          "description": "Spiko's tokenized share class of an Amundi-managed EUR overnight money market fund. Tracks short-term EUR money-market rates via overnight swap exposure; daily NAV. Distributed on Stellar Soroban (5-decimal share token).",
+          "notes": "Amundi overnight swap fund (EUR-denominated, Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "Spiko App",
+              "url": "https://app.spiko.io"
+            },
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            }
+          ]
         }
       ]
     },

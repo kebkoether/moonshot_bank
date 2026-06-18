@@ -91,6 +91,12 @@
       "marketCap": "$25M",
       "asOf": "2026-06-18",
       "source": "Stellar Expert (supply)"
+    },
+    "safo-cdgsc6": {
+      "yield7d": "1.09%",
+      "marketCap": "$76M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (yield) + on-chain supply"
     }
   }
 }
