@@ -14,9 +14,9 @@
   },
   "categories": [
     {
-      "id": "mmf",
-      "name": "Money Market Funds",
-      "description": "Tokenized shares of regulated money market funds.",
+      "id": "treasuries",
+      "name": "Tokenized Treasuries",
+      "description": "Tokenized government debt instruments and treasury-backed money market funds.",
       "assets": [
         {
           "code": "BENJI",
@@ -24,18 +24,11 @@
           "issuerName": "Franklin Templeton",
           "issuerUrl": "https://www.franklintempleton.com/articles/strategist-views/putting-our-money-market-fund-on-the-blockchain",
           "description": "The Franklin OnChain U.S. Government Money Fund (FOBXX) is the first U.S.-registered mutual fund to use a public blockchain for transactions and shareholder ownership. Each BENJI token represents one share of the fund, which invests in U.S. government securities, cash, and repurchase agreements.",
-          "notes": "Franklin OnChain U.S. Government Money Fund",
+          "notes": "Franklin OnChain U.S. Government Money Fund (MMF)",
           "yield7d": null,
           "marketCap": null,
           "venues": []
-        }
-      ]
-    },
-    {
-      "id": "treasuries",
-      "name": "Tokenized Treasuries",
-      "description": "Tokenized government debt instruments.",
-      "assets": [
+        },
         {
           "code": "USDY",
           "issuer": "GAJMPX5NBOG6TQFPQGRABJEEB2YE7RFRLUKJDZAZGAD5GFX4J7TADAZ6",
@@ -43,6 +36,17 @@
           "issuerUrl": "https://ondo.finance/usdy",
           "description": "Ondo's yield-bearing tokenized note backed by short-term U.S. Treasuries and bank deposits. USDY accrues yield natively — the per-token price increases daily as interest is earned.",
           "notes": "Yield-bearing USD",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
+        },
+        {
+          "code": "USTRY",
+          "issuer": "GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC",
+          "issuerName": "Etherfuse",
+          "issuerUrl": "https://www.etherfuse.com",
+          "description": "Tokenized U.S. Treasury notes issued by Etherfuse on Stellar. Gives global investors USD-denominated exposure to short-duration U.S. government debt.",
+          "notes": "U.S. Treasury notes (USD-denominated)",
           "yield7d": null,
           "marketCap": null,
           "venues": []
