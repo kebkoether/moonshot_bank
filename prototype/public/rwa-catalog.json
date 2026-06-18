@@ -471,6 +471,30 @@
               "url": "https://www.sushi.com/stellar/swap"
             }
           ]
+        },
+        {
+          "code": "MGUSD",
+          "issuer": "GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ",
+          "issuerName": "MoneyGram",
+          "issuerUrl": "https://mgusd.moneygram.com",
+          "description": "MoneyGram's USD-anchored Stellar stablecoin, used in MoneyGram's global remittance corridors for instant fiat onramps and offramps. Backed 1:1 by USD reserves at regulated financial institutions.",
+          "notes": "USD-anchored (MoneyGram)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "StellarX (MGUSD/USDC)",
+              "url": "https://www.stellarx.com/markets/MGUSD-GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius (USDC → MGUSD)",
+              "url": "https://aqua.network/swap/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/MGUSD:GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ/"
+            },
+            {
+              "name": "MoneyGram MGUSD",
+              "url": "https://mgusd.moneygram.com"
+            }
+          ]
         }
       ]
     },

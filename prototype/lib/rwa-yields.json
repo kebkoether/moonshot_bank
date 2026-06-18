@@ -85,6 +85,12 @@
       "marketCap": "$4.9M",
       "asOf": "2026-06-18",
       "source": "rwa.xyz (Stellar supply, fund APY)"
+    },
+    "mgusd-gaiugz": {
+      "yield7d": null,
+      "marketCap": "$25M",
+      "asOf": "2026-06-18",
+      "source": "Stellar Expert (supply)"
     }
   }
 }
