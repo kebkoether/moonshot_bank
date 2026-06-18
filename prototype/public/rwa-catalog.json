@@ -27,7 +27,16 @@
           "notes": "Franklin OnChain U.S. Government Money Fund (MMF)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "StellarX (BENJI/USDC)",
+              "url": "https://www.stellarx.com/markets/BENJI-GBHNGLLIE3KWGKCHIKMHJ5HVZHYIK7WTBE4QF5PLAKL4CJGSEU7HZIW5/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Franklin BENJI App",
+              "url": "https://benjiapp.com"
+            }
+          ]
         },
         {
           "code": "USDY",
@@ -38,7 +47,20 @@
           "notes": "Yield-bearing USD",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "StellarX (USDY/USDC)",
+              "url": "https://www.stellarx.com/markets/USDY-GAJMPX5NBOG6TQFPQGRABJEEB2YE7RFRLUKJDZAZGAD5GFX4J7TADAZ6/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius",
+              "url": "https://aqua.network/swap"
+            },
+            {
+              "name": "Ondo Portal",
+              "url": "https://ondo.finance/usdy"
+            }
+          ]
         },
         {
           "code": "USTRY",
@@ -49,7 +71,20 @@
           "notes": "U.S. Treasury notes (USD-denominated)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "StellarX (USTRY/USDC)",
+              "url": "https://www.stellarx.com/markets/USTRY-GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius",
+              "url": "https://aqua.network/swap"
+            },
+            {
+              "name": "Etherfuse App",
+              "url": "https://app.etherfuse.com"
+            }
+          ]
         }
       ]
     },
@@ -67,7 +102,20 @@
           "notes": "Mexican T-bills (MXN-denominated)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "StellarX (CETES/USDC)",
+              "url": "https://www.stellarx.com/markets/CETES-GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius",
+              "url": "https://aqua.network/swap"
+            },
+            {
+              "name": "Etherfuse App",
+              "url": "https://app.etherfuse.com"
+            }
+          ]
         },
         {
           "code": "EUTBL",
@@ -78,7 +126,20 @@
           "notes": "EU T-bills (EUR-denominated, Soroban)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            },
+            {
+              "name": "Spiko App",
+              "url": "https://app.spiko.io"
+            }
+          ]
         },
         {
           "code": "UKTBL",
@@ -89,7 +150,20 @@
           "notes": "UK T-bills (GBP-denominated, Soroban)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            },
+            {
+              "name": "Spiko App",
+              "url": "https://app.spiko.io"
+            }
+          ]
         }
       ]
     },
@@ -119,7 +193,20 @@
           "notes": "Bitcoin-denominated (Soroban)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            },
+            {
+              "name": "Solv Protocol",
+              "url": "https://app.solv.finance"
+            }
+          ]
         },
         {
           "code": "XSOLVBTC",
@@ -130,7 +217,20 @@
           "notes": "SolvBTC.BBN — yield-bearing BTC",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            },
+            {
+              "name": "Solv Protocol",
+              "url": "https://app.solv.finance"
+            }
+          ]
         }
       ]
     },
@@ -148,7 +248,20 @@
           "notes": "USD-anchored (Soroban SAC)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            },
+            {
+              "name": "StellarX (USDC/XLM, classic)",
+              "url": "https://www.stellarx.com/markets/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/native"
+            }
+          ]
         },
         {
           "code": "PYUSD",
@@ -159,7 +272,16 @@
           "notes": "USD-anchored (Soroban)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            }
+          ]
         },
         {
           "code": "EURC",
@@ -170,7 +292,20 @@
           "notes": "EUR-anchored",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "StellarX (EURC/USDC)",
+              "url": "https://www.stellarx.com/markets/EURC-GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPP2/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "StellarX (EURC/XLM)",
+              "url": "https://www.stellarx.com/markets/EURC-GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPP2/native"
+            },
+            {
+              "name": "Aquarius",
+              "url": "https://aqua.network/swap"
+            }
+          ]
         },
         {
           "code": "EURAU",
@@ -181,7 +316,16 @@
           "notes": "EUR-anchored (Soroban)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            }
+          ]
         },
         {
           "code": "EURCV",
@@ -192,7 +336,16 @@
           "notes": "EUR-anchored (Soroban)",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            }
+          ]
         }
       ]
     },
@@ -210,7 +363,20 @@
           "notes": "Lending protocol governance",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "StellarX (BLND/XLM)",
+              "url": "https://www.stellarx.com/markets/BLND-GDJEHTBE6ZHUXSWFI642DCGLUOECLHPF3KSXHPXTSTJ7E3JF6MQ5EZYY/native"
+            },
+            {
+              "name": "StellarX (BLND/USDC)",
+              "url": "https://www.stellarx.com/markets/BLND-GDJEHTBE6ZHUXSWFI642DCGLUOECLHPF3KSXHPXTSTJ7E3JF6MQ5EZYY/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius",
+              "url": "https://aqua.network/swap"
+            }
+          ]
         },
         {
           "code": "AQUA",
@@ -221,7 +387,20 @@
           "notes": "AMM rewards token",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "Aquarius",
+              "url": "https://aqua.network/swap"
+            },
+            {
+              "name": "StellarX (AQUA/XLM)",
+              "url": "https://www.stellarx.com/markets/AQUA-GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA/native"
+            },
+            {
+              "name": "StellarX (AQUA/USDC)",
+              "url": "https://www.stellarx.com/markets/AQUA-GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            }
+          ]
         },
         {
           "code": "YBX",
@@ -232,7 +411,16 @@
           "notes": "Lending protocol governance",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "StellarX (YBX/XLM)",
+              "url": "https://www.stellarx.com/markets/YBX-GBUYYBXWCLT2MOSSHRFCKMEDFOVSCAXNIEW424GLN666OEXHAAWBDYMX/native"
+            },
+            {
+              "name": "Aquarius",
+              "url": "https://aqua.network/swap"
+            }
+          ]
         },
         {
           "code": "SHX",
@@ -243,7 +431,20 @@
           "notes": "Exchange ecosystem token",
           "yield7d": null,
           "marketCap": null,
-          "venues": []
+          "venues": [
+            {
+              "name": "StellarX (SHX/XLM)",
+              "url": "https://www.stellarx.com/markets/SHX-GDSTRSHXHGJ7ZIVRBXEYE5Q74XUVCUSEKEBR7UCHEUUEK72N7I7KJ6JH/native"
+            },
+            {
+              "name": "StellarX (SHX/USDC)",
+              "url": "https://www.stellarx.com/markets/SHX-GDSTRSHXHGJ7ZIVRBXEYE5Q74XUVCUSEKEBR7UCHEUUEK72N7I7KJ6JH/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius",
+              "url": "https://aqua.network/swap"
+            }
+          ]
         }
       ]
     }
