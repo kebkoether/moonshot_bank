@@ -37,25 +37,28 @@
   <title>Stellar Scope</title>
   <!--
     Stellar Wallets Kit replaces the old freighter-api script. It speaks to
-    Freighter, xBull, Albedo, LOBSTR, Hana, Rabet directly via named buttons,
-    and falls back to its built-in modal for any other wallet (WalletConnect,
-    Ledger, etc.). The kit is loaded as ESM from esm.sh; the inline page
-    script below this stays a classic script and uses window.connectWalletById
-    / window.connectWalletViaModal which this module installs on window.
+    Freighter, Albedo, LOBSTR, Hana, Rabet directly via named buttons, and
+    falls back to its built-in modal for the same set (xBull is currently
+    disabled — see the module-level comment for why). The kit is loaded as
+    ESM from esm.sh; the inline page script below stays a classic script and
+    uses window.connectWalletById / window.connectWalletViaModal which this
+    module installs on window.
   -->
   <script type="module">
-    // Freighter + LOBSTR need ?bundle because their underlying npm packages
-    // (@stellar/freighter-api, @lobstrco/signer-extension-api) only expose a
-    // default export on esm.sh, while the kit imports named members from
-    // them. Without bundling, the module fails with a SyntaxError that
-    // takes the whole <script type="module"> down with it.
+    // Freighter + LOBSTR use ?bundle because their underlying npm packages
+    // only expose a default export on esm.sh, while the kit imports named
+    // members from them. Without ?bundle the module fails with a
+    // SyntaxError and every wallet button stops working.
     //
-    // xBull stays unbundled because esbuild fails to bundle its tslib helper
-    // (__spreadArray); the raw import works fine on its own.
+    // xBull is intentionally not loaded: @creit.tech/xbull-wallet-connect
+    // imports `encodeUTF8` as a named member of tweetnacl-util (which only
+    // ships a default export on esm.sh), and its ?bundle URL returns
+    // HTTP 500 because esbuild can't resolve a tslib helper. Until there's
+    // a workable CDN setup or self-hosted bundle, xBull users can paste
+    // their G-address into the wallet panel manually.
     import { StellarWalletsKit, Networks } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0?bundle";
     import { FreighterModule, FREIGHTER_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/freighter?bundle";
     import { LobstrModule, LOBSTR_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/lobstr?bundle";
-    import { xBullModule, XBULL_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/xbull";
     import { AlbedoModule, ALBEDO_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/albedo";
     import { HanaModule, HANA_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/hana";
     import { RabetModule, RABET_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/rabet";
@@ -64,7 +67,6 @@
       network: Networks.PUBLIC,
       modules: [
         new FreighterModule(),
-        new xBullModule(),
         new AlbedoModule(),
         new LobstrModule(),
         new HanaModule(),
@@ -74,7 +76,6 @@
 
     window.SWK_IDS = {
       freighter: FREIGHTER_ID,
-      xbull: XBULL_ID,
       albedo: ALBEDO_ID,
       lobstr: LOBSTR_ID,
       hana: HANA_ID,
@@ -2076,10 +2077,6 @@
           <button class="wallet-pill" onclick="connectWalletById('freighter', 'Freighter')" title="Connect Freighter">
             <img src="https://stellar.creit.tech/wallet-icons/freighter.png" alt="" />
             Freighter
-          </button>
-          <button class="wallet-pill" onclick="connectWalletById('xbull', 'xBull')" title="Connect xBull">
-            <img src="https://stellar.creit.tech/wallet-icons/xbull.png" alt="" />
-            xBull
           </button>
           <button class="wallet-pill" onclick="connectWalletById('albedo', 'Albedo')" title="Connect Albedo">
             <img src="https://stellar.creit.tech/wallet-icons/albedo.png" alt="" />
