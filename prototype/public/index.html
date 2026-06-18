@@ -35,7 +35,79 @@
     });
   </script>
   <title>Stellar Scope</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-freighter-api/2.0.0/index.min.js" defer></script>
+  <!--
+    Stellar Wallets Kit replaces the old freighter-api script. It speaks to
+    Freighter, xBull, Albedo, LOBSTR, Hana, Rabet directly via named buttons,
+    and falls back to its built-in modal for any other wallet (WalletConnect,
+    Ledger, etc.). The kit is loaded as ESM from esm.sh; the inline page
+    script below this stays a classic script and uses window.connectWalletById
+    / window.connectWalletViaModal which this module installs on window.
+  -->
+  <script type="module">
+    import { StellarWalletsKit, Networks } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0";
+    import { FreighterModule, FREIGHTER_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/freighter";
+    import { xBullModule, XBULL_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/xbull";
+    import { AlbedoModule, ALBEDO_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/albedo";
+    import { LobstrModule, LOBSTR_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/lobstr";
+    import { HanaModule, HANA_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/hana";
+    import { RabetModule, RABET_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/rabet";
+
+    StellarWalletsKit.init({
+      network: Networks.PUBLIC,
+      modules: [
+        new FreighterModule(),
+        new xBullModule(),
+        new AlbedoModule(),
+        new LobstrModule(),
+        new HanaModule(),
+        new RabetModule(),
+      ],
+    });
+
+    window.SWK_IDS = {
+      freighter: FREIGHTER_ID,
+      xbull: XBULL_ID,
+      albedo: ALBEDO_ID,
+      lobstr: LOBSTR_ID,
+      hana: HANA_ID,
+      rabet: RABET_ID,
+    };
+
+    async function connectAndAdd(address, label) {
+      if (typeof window.addWalletToPortfolio !== "function") {
+        alert("App not ready yet — try again in a moment.");
+        return;
+      }
+      if (await window.addWalletToPortfolio(address, label || null)) {
+        if (typeof window.enterPortfolioMode === "function") {
+          await window.enterPortfolioMode();
+        }
+      }
+    }
+
+    window.connectWalletById = async function (walletId, label) {
+      try {
+        StellarWalletsKit.setWallet(walletId);
+        const { address } = await StellarWalletsKit.fetchAddress();
+        await connectAndAdd(address, label || null);
+      } catch (e) {
+        const msg = e?.message || (typeof e === "string" ? e : "Could not connect");
+        alert("Could not connect: " + msg);
+      }
+    };
+
+    window.connectWalletViaModal = async function () {
+      try {
+        const { address } = await StellarWalletsKit.authModal();
+        await connectAndAdd(address, null);
+      } catch (e) {
+        // -1 with "closed" is the user dismissing the modal; stay silent
+        if (e && (e.code === -1 || /closed/i.test(e.message || ""))) return;
+        const msg = e?.message || String(e);
+        alert("Could not connect: " + msg);
+      }
+    };
+  </script>
   <style>
     /* Dark theme (default) and light theme.
        Both use the same variable NAMES so every existing rule that says
@@ -290,6 +362,57 @@
     .wallet-icon {
       width: 18px;
       height: 18px;
+    }
+
+    .wallet-picker {
+      margin: 0 auto 32px;
+      max-width: 720px;
+      text-align: center;
+    }
+
+    .wallet-picker-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .wallet-picker-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .wallet-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, transform 0.15s;
+    }
+
+    .wallet-pill img {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+    }
+
+    .wallet-pill:hover {
+      border-color: var(--stellar-blue);
+      transform: translateY(-1px);
+    }
+
+    .wallet-pill-other {
+      background: transparent;
+      color: var(--text-secondary);
+      border-style: dashed;
     }
 
     .header-right {
@@ -1891,13 +2014,13 @@
     </div>
     <div class="header-right">
       <button class="btn btn-secondary" onclick="enterPortfolioMode()" style="font-size:13px; padding: 10px 18px;">My Portfolio</button>
-      <button class="wallet-btn" id="freighterBtn" onclick="connectFreighter()">
+      <button class="wallet-btn" onclick="connectWalletViaModal()">
         <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="6" width="20" height="12" rx="2"></rect>
           <path d="M22 10H2"></path>
           <path d="M6 14h.01"></path>
         </svg>
-        Connect Freighter
+        Connect Wallet
       </button>
       <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light / dark theme" aria-label="Toggle theme">
         <!-- Sun icon: shown in dark mode (clicking switches TO light) -->
@@ -1934,14 +2057,42 @@
         <button class="btn" onclick="enterPortfolioMode()" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;">
           My Portfolio
         </button>
-        <button class="wallet-btn" onclick="connectFreighter()" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;">
-          <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px">
-            <rect x="2" y="6" width="20" height="12" rx="2"></rect>
-            <path d="M22 10H2"></path>
-            <path d="M6 14h.01"></path>
-          </svg>
-          Connect Freighter
+        <button class="btn btn-secondary" onclick="connectWalletViaModal()" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;" title="Connect any supported Stellar wallet">
+          Connect Wallet
         </button>
+      </div>
+
+      <div class="wallet-picker">
+        <div class="wallet-picker-label">Or pick a wallet:</div>
+        <div class="wallet-picker-row">
+          <button class="wallet-pill" onclick="connectWalletById('freighter', 'Freighter')" title="Connect Freighter">
+            <img src="https://stellar.creit.tech/wallet-icons/freighter.png" alt="" />
+            Freighter
+          </button>
+          <button class="wallet-pill" onclick="connectWalletById('xbull', 'xBull')" title="Connect xBull">
+            <img src="https://stellar.creit.tech/wallet-icons/xbull.png" alt="" />
+            xBull
+          </button>
+          <button class="wallet-pill" onclick="connectWalletById('albedo', 'Albedo')" title="Connect Albedo">
+            <img src="https://stellar.creit.tech/wallet-icons/albedo.png" alt="" />
+            Albedo
+          </button>
+          <button class="wallet-pill" onclick="connectWalletById('lobstr', 'LOBSTR')" title="Connect LOBSTR">
+            <img src="https://stellar.creit.tech/wallet-icons/lobstr.png" alt="" />
+            LOBSTR
+          </button>
+          <button class="wallet-pill" onclick="connectWalletById('hana', 'Hana')" title="Connect Hana">
+            <img src="https://stellar.creit.tech/wallet-icons/hana.png" alt="" />
+            Hana
+          </button>
+          <button class="wallet-pill" onclick="connectWalletById('rabet', 'Rabet')" title="Connect Rabet">
+            <img src="https://stellar.creit.tech/wallet-icons/rabet.png" alt="" />
+            Rabet
+          </button>
+          <button class="wallet-pill wallet-pill-other" onclick="connectWalletViaModal()" title="WalletConnect, Ledger, and others">
+            Other wallet…
+          </button>
+        </div>
       </div>
 
 
@@ -2007,8 +2158,6 @@
     let nftsData = null;
     let portfolioHistory = null;
     let portfolioHistoryRange = "30d";
-    let freighterConnected = false;
-    let freighterAddress = null;
     const currentNetwork = "mainnet"; // Mainnet only — read-only protocol
 
     // Multi-wallet state
@@ -2168,110 +2317,9 @@
     refreshTicker();
     setInterval(refreshTicker, 30000);
 
-    // ── Freighter Wallet ──────────────────────────────────────
-    async function connectFreighter() {
-      const btn = document.getElementById("freighterBtn");
-
-      // If already connected, disconnect
-      if (freighterConnected) {
-        freighterConnected = false;
-        freighterAddress = null;
-        btn.className = "wallet-btn";
-        btn.innerHTML = `
-          <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="6" width="20" height="12" rx="2"></rect>
-            <path d="M22 10H2"></path>
-            <path d="M6 14h.01"></path>
-          </svg>
-          Connect Freighter
-        `;
-        return;
-      }
-
-      btn.disabled = true;
-      btn.textContent = "Connecting...";
-
-      try {
-        // Check if Freighter extension is installed
-        if (typeof window.freighterApi !== "undefined") {
-          // Request access first
-          if (window.freighterApi.requestAccess) {
-            await window.freighterApi.requestAccess();
-          } else if (window.freighterApi.setAllowed) {
-            await window.freighterApi.setAllowed();
-          }
-
-          // Get the public key — try all known method names
-          if (window.freighterApi.getPublicKey) {
-            freighterAddress = await window.freighterApi.getPublicKey();
-          } else if (window.freighterApi.getAddress) {
-            const addrResult = await window.freighterApi.getAddress();
-            freighterAddress = typeof addrResult === "string" ? addrResult : addrResult.address;
-          } else if (window.freighterApi.requestPublicKey) {
-            freighterAddress = await window.freighterApi.requestPublicKey();
-          }
-
-          // Handle wrapped responses (some versions return {publicKey: "G..."})
-          if (freighterAddress && typeof freighterAddress === "object") {
-            freighterAddress = freighterAddress.publicKey || freighterAddress.address || null;
-          }
-
-          // Network is always mainnet
-        } else {
-          // Freighter not installed — try detecting via window message
-          // Give a helpful error
-          throw new Error("NOT_INSTALLED");
-        }
-
-        if (!freighterAddress) throw new Error("No address returned");
-
-        freighterConnected = true;
-        btn.disabled = false;
-        btn.className = "wallet-btn connected";
-        btn.innerHTML = `
-          <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-          </svg>
-          ${freighterAddress.slice(0, 4)}...${freighterAddress.slice(-4)}
-        `;
-
-        // Auto-add to portfolio and enter portfolio mode
-        document.getElementById("addressInput").value = freighterAddress;
-        await addWalletToPortfolio(freighterAddress, "Freighter Wallet");
-        await enterPortfolioMode();
-
-      } catch (e) {
-        btn.disabled = false;
-        btn.className = "wallet-btn";
-
-        if (e.message === "NOT_INSTALLED") {
-          btn.innerHTML = `
-            <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="6" width="20" height="12" rx="2"></rect>
-              <path d="M22 10H2"></path>
-              <path d="M6 14h.01"></path>
-            </svg>
-            Connect Freighter
-          `;
-          // Open Freighter install page
-          if (confirm("Freighter wallet extension not detected.\\n\\nWould you like to install it?")) {
-            window.open("https://www.freighter.app/", "_blank");
-          }
-        } else {
-          console.error("Freighter connection error:", e);
-          btn.innerHTML = `
-            <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="6" width="20" height="12" rx="2"></rect>
-              <path d="M22 10H2"></path>
-              <path d="M6 14h.01"></path>
-            </svg>
-            Connect Freighter
-          `;
-          alert("Failed to connect: " + e.message);
-        }
-      }
-    }
+    // Wallet connections are handled by Stellar Wallets Kit in the <script
+    // type="module"> block at the top of the file — see window.connectWalletById
+    // and window.connectWalletViaModal.
 
     // ── Load Whale Leaderboard ────────────────────────────────
     async function loadWhales() {
@@ -2335,15 +2383,8 @@
       }
     }
 
-    // Auto-detect Freighter and auto-load portfolio on page load
     window.addEventListener("load", () => {
-      setTimeout(async () => {
-        const hasFreighter = typeof window.freighterApi !== "undefined" || typeof freighterApi !== "undefined";
-        if (hasFreighter) {
-          console.log("Freighter wallet detected");
-        }
-
-        // Load whale leaderboards on welcome page
+      setTimeout(() => {
         loadWhales();
         loadPortfolioWhales();
       }, 500);
