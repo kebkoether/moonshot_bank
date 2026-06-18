@@ -14,11 +14,26 @@
  *    and USD value (shares priced 1:1 with deposit token for v1 — refines
  *    later with convert_to_assets calls)
  */
-const { getTokenBalance, formatTokenAmount } = require("../soroban-rpc");
+const { getTokenBalance, simulateContractCall, formatTokenAmount } = require("../soroban-rpc");
+const StellarSdk = require("@stellar/stellar-sdk");
+const { nativeToScVal, scValToNative } = StellarSdk;
 
 const UPSHIFT_API_BASE = "https://api.upshift.finance/v1";
 const VAULT_CACHE_TTL = 60 * 60_000; // 1 hour; vault list is stable
 let vaultCache = { ts: 0, vaults: null };
+
+// Display formatter for token amounts in the DeFi position cards.
+// We trim trailing zeros and pick a sensible decimal count by magnitude.
+function fmtTokenAmount(n) {
+  const v = parseFloat(n);
+  if (!Number.isFinite(v)) return String(n);
+  if (v === 0) return "0.00";
+  if (Math.abs(v) >= 1000) return v.toFixed(0);
+  if (Math.abs(v) >= 1) return v.toFixed(2);
+  if (Math.abs(v) >= 0.01) return v.toFixed(4);
+  // Sub-cent: more decimals to show non-zero value
+  return v.toFixed(6).replace(/\.?0+$/, "");
+}
 
 /**
  * Fetch the Stellar-chain subset of Upshift's vault list.
@@ -54,26 +69,49 @@ async function getVaultPosition(vault, userAddress, priceCtx) {
     if (!rawBalance || rawBalance === "0") return null;
     if (BigInt(rawBalance) === 0n) return null;
 
-    // Share token decimals — confirmed 13 across all current Upshift Stellar
-    // vaults by querying decimals() on each contract. Hard-coded rather than
-    // re-fetched because (a) it's stable and (b) saves a per-position RPC.
+    // Share token uses 13 decimals (confirmed via decimals() probe on each
+    // Upshift Stellar vault); deposit token is 7 decimals (Stellar standard).
     const SHARE_DECIMALS = 13;
-    const sharesHuman = formatTokenAmount(rawBalance, SHARE_DECIMALS);
-    const sharesNum = parseFloat(sharesHuman);
-
     const meta = vault.stellar_vault_metadata || {};
     const depositSymbol = meta.deposit_token_symbol || "?";
+    const depositDecimals = meta.deposit_token_decimals ?? 7;
 
-    // v1 simplification: price 1 share = 1 deposit token. Real share price
-    // would come from vault.convert_to_assets(shares). At current APYs
-    // (~3%) the under-report is small.
+    // Ask the vault what the user's shares are currently worth in deposit-
+    // token units. ERC-4626-style — exact, accounts for accrued yield.
+    let rawAssets = null;
+    try {
+      const result = await simulateContractCall(
+        vault.address,
+        "convert_to_assets",
+        [nativeToScVal(BigInt(rawBalance), { type: "i128" })]
+      );
+      if (result) rawAssets = scValToNative(result);
+    } catch (e) {
+      // If the vault doesn't expose convert_to_assets we fall back below.
+    }
+
+    // Shares as deposit-token units (the 1:1 baseline used to mint at deposit).
+    // We can't recover the true initial deposit on-chain, but new shares are
+    // minted in proportion to deposit_assets / share_price_at_deposit, and
+    // share_price was ≈ 1 deposit_token / share at vault inception. So this
+    // is a close approximation of "what the user originally deposited",
+    // and `current_value - this` ≈ accrued yield.
+    const sharesAsDepositUnits = Number(BigInt(rawBalance)) / Math.pow(10, SHARE_DECIMALS);
+
+    // Current redeemable value in deposit-token units.
+    const currentAssetUnits = rawAssets != null
+      ? Number(BigInt(rawAssets)) / Math.pow(10, depositDecimals)
+      : sharesAsDepositUnits; // fallback if convert_to_assets isn't exposed
+
+    const accruedUnits = Math.max(0, currentAssetUnits - sharesAsDepositUnits);
+
     let depositPriceUSD = 0;
     if (depositSymbol === "USDC") {
       depositPriceUSD = 1;
     } else if (depositSymbol === "XLM" && priceCtx?.xlmPrice?.usd) {
       depositPriceUSD = priceCtx.xlmPrice.usd;
     }
-    const valueUSD = sharesNum * depositPriceUSD;
+    const valueUSD = currentAssetUnits * depositPriceUSD;
 
     // APY: prefer 7-day, fall back to 30-day, then 1-day.
     const apyMap = vault.historical_apy || {};
@@ -87,15 +125,14 @@ async function getVaultPosition(vault, userAddress, priceCtx) {
       vaultName: vault.vault_name,
       receiptSymbol: vault.receipt_token_symbol,
       deposited: {
-        // We don't have convert_to_assets yet — show share count as
-        // the deposited amount, scaled to deposit-token units (1:1).
-        amount: sharesHuman,
+        // Approximate initial deposit (shares × 1.0). True initial requires
+        // event history; this is correct within the first deposit cycle.
+        amount: fmtTokenAmount(sharesAsDepositUnits),
         asset: depositSymbol,
       },
       yield: {
-        // No on-chain accrued-yield query yet — leave 0 and let APY tell
-        // the story. Refine with convert_to_assets in a follow-up.
-        accrued: "0",
+        // Difference between current redeemable value and the 1:1 baseline.
+        accrued: fmtTokenAmount(accruedUnits),
         asset: depositSymbol,
         apy: apyPercent,
       },
