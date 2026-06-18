@@ -169,6 +169,30 @@
               "url": "https://www.sushi.com/stellar/swap"
             }
           ]
+        },
+        {
+          "code": "USDM1",
+          "issuer": "GDM5QWWXCMDTQMZAKMYTCI52LA7FWBHAZMU5NJLMIFHDJISJRP2ZWPKC",
+          "issuerName": "Republic of the Marshall Islands / M1X Global",
+          "issuerUrl": "https://usdm1bond.com",
+          "description": "Sovereign Brady-style bond natively issued on-chain by the Republic of the Marshall Islands under NY law, backed 1:1 by short-duration U.S. Treasuries. Bankruptcy-remote; transferable across Stellar, Ethereum, and Solana.",
+          "notes": "Sovereign bond, 1:1 U.S. T-Bill-backed",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "USDM1 Bond Site",
+              "url": "https://usdm1bond.com"
+            },
+            {
+              "name": "StellarX (USDM1/USDC)",
+              "url": "https://www.stellarx.com/markets/USDM1-GDM5QWWXCMDTQMZAKMYTCI52LA7FWBHAZMU5NJLMIFHDJISJRP2ZWPKC/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius (USDC → USDM1)",
+              "url": "https://aqua.network/swap/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/USDM1:GDM5QWWXCMDTQMZAKMYTCI52LA7FWBHAZMU5NJLMIFHDJISJRP2ZWPKC/"
+            }
+          ]
         }
       ]
     },

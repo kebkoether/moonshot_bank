@@ -97,6 +97,12 @@
       "marketCap": "$76M",
       "asOf": "2026-06-18",
       "source": "rwa.xyz (yield) + on-chain supply"
+    },
+    "usdm1-gdm5qw": {
+      "yield7d": "1.65%",
+      "marketCap": "$1.05M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (yield) + Stellar Expert (supply)"
     }
   }
 }
