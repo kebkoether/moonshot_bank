@@ -2514,6 +2514,36 @@
       return rwaCatalog;
     }
 
+    // Fetch live RWA stats (market cap from Horizon + curated yields).
+    // Best-effort: on failure, return empty so the page still renders.
+    async function ensureRwaStats() {
+      if (rwaStats) return rwaStats;
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/rwa-stats`);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        rwaStats = await res.json();
+      } catch (e) {
+        console.warn("RWA stats unavailable:", e.message);
+        rwaStats = { stats: {}, asOf: null };
+      }
+      return rwaStats;
+    }
+
+    // Merge curated catalog asset with server-side stats. Server values win
+    // when present (since they're either live Horizon data or fresher curated
+    // entries from rwa-yields.json).
+    function mergedRwaAsset(a) {
+      const slug = rwaSlug(a);
+      const s = rwaStats?.stats?.[slug] || {};
+      return {
+        ...a,
+        yield7d: s.yield7d || a.yield7d || null,
+        marketCap: s.marketCap || a.marketCap || null,
+        statsAsOf: s.asOf || null,
+        statsSource: s.source || null,
+      };
+    }
+
     async function renderRwasPage() {
       const app = document.getElementById("app");
       app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="rwa-page-subtitle">Loading catalog…</div></div>`;
@@ -2523,6 +2553,7 @@
         app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="error-banner">Failed to load catalog: ${escapeHtml(e.message)}</div></div>`;
         return;
       }
+      await ensureRwaStats();
 
       const categories = (rwaCatalog.categories || []);
       const total = categories.reduce((s, c) => s + (c.assets?.length || 0), 0);
@@ -2547,7 +2578,8 @@
         if (count === 0) {
           html += `<div class="rwa-empty-category">No assets yet — add issuer addresses to rwa-catalog.json.</div>`;
         } else {
-          for (const a of cat.assets) {
+          for (const rawAsset of cat.assets) {
+            const a = mergedRwaAsset(rawAsset);
             const isSoroban = !!a.contractId;
             const address = a.issuer || a.contractId || "";
             const kindBadge = isSoroban
@@ -2594,12 +2626,14 @@
         app.innerHTML = `<div class="rwa-detail"><a href="#/rwas" class="rwa-detail-back">← Back to RWAs</a><div class="error-banner">Failed to load catalog: ${escapeHtml(e.message)}</div></div>`;
         return;
       }
+      await ensureRwaStats();
       const hit = findRwaBySlug(slug);
       if (!hit) {
         app.innerHTML = `<div class="rwa-detail"><a href="#/rwas" class="rwa-detail-back">← Back to RWAs</a><div class="error-banner">Asset not found: ${escapeHtml(slug)}</div></div>`;
         return;
       }
-      const { asset: a, category } = hit;
+      const { asset: rawAsset, category } = hit;
+      const a = mergedRwaAsset(rawAsset);
       const isSoroban = !!a.contractId;
       const address = a.issuer || a.contractId || "";
       const expertUrl = stellarExpertUrl(a);
@@ -2651,7 +2685,16 @@
               <div class="rwa-stat-value">${isSoroban ? "Soroban" : "Classic"}</div>
             </div>
           </div>
+      `;
 
+      if (a.statsAsOf || a.statsSource) {
+        const parts = [];
+        if (a.statsAsOf) parts.push(`as of ${escapeHtml(a.statsAsOf)}`);
+        if (a.statsSource) parts.push(`source: ${escapeHtml(a.statsSource)}`);
+        html += `<div style="font-size:12px;color:var(--text-muted);margin-top:-12px;margin-bottom:24px;">${parts.join(" · ")}</div>`;
+      }
+
+      html += `
           <div class="rwa-section-title">${isSoroban ? "Contract Address" : "Issuer Address"}</div>
           <div class="rwa-address-row">
             <div class="rwa-address-text" title="${escapeHtml(address)}">${escapeHtml(address)}</div>
@@ -2743,6 +2786,7 @@
     // Top-level page routing. Hash-based so it works on any static host.
     let currentPage = "portfolio";       // "portfolio" | "rwas"
     let rwaCatalog = null;                // Cached fetch of rwa-catalog.json
+    let rwaStats = null;                  // Cached fetch of /api/v1/rwa-stats
 
     const API_BASE = window.location.origin;
     const WELCOME_HTML = document.getElementById("app").innerHTML; // Save initial welcome screen

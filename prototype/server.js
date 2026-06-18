@@ -749,6 +749,109 @@ app.get("/api/v1/history/stats", (req, res) => {
   }
 });
 
+// ── RWA Catalog Stats ────────────────────────────────────────────────────────
+// Computes live market caps from Horizon for classic assets in the RWA
+// catalog, and overlays hand-curated yield values from lib/rwa-yields.json.
+// Frontend calls this once on RWA tab render. Soroban tokens have null market
+// cap (would require Soroban contract introspection — future work).
+
+const fs = require("fs");
+const RWA_CATALOG_PATH = path.join(__dirname, "public", "rwa-catalog.json");
+const RWA_YIELDS_PATH = path.join(__dirname, "lib", "rwa-yields.json");
+const RWA_STATS_TTL = 5 * 60_000; // 5 min; Horizon supply moves slowly
+let rwaStatsCache = { ts: 0, payload: null };
+
+function rwaSlugServer(a) {
+  const id = (a.issuer || a.contractId || "").toLowerCase().slice(0, 6);
+  return `${(a.code || "").toLowerCase()}-${id}`;
+}
+
+function formatBigUSD(n) {
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+async function fetchClassicMarketCap(code, issuer, xlmPrice) {
+  // Horizon /assets returns total issued amount for the asset.
+  try {
+    const url = `${HORIZON_URL}/assets?asset_code=${encodeURIComponent(code)}&asset_issuer=${encodeURIComponent(issuer)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const records = data?._embedded?.records || [];
+    if (records.length === 0) return null;
+    const supply = parseFloat(records[0].amount || "0");
+    if (!Number.isFinite(supply) || supply <= 0) return null;
+    const price = await pricingEngine.priceClassicAsset(
+      { priceViaSDEX: getAssetPriceViaSDEX },
+      code,
+      issuer
+    );
+    if (!price || !price.usd) return { supply, marketCapUSD: null };
+    return { supply, marketCapUSD: supply * price.usd, price };
+  } catch (e) {
+    console.warn(`RWA market cap fetch failed for ${code}/${issuer}:`, e.message);
+    return null;
+  }
+}
+
+app.get("/api/v1/rwa-stats", async (req, res) => {
+  if (rwaStatsCache.payload && Date.now() - rwaStatsCache.ts < RWA_STATS_TTL) {
+    return res.json(rwaStatsCache.payload);
+  }
+  try {
+    const catalog = JSON.parse(fs.readFileSync(RWA_CATALOG_PATH, "utf8"));
+    const yieldsFile = JSON.parse(fs.readFileSync(RWA_YIELDS_PATH, "utf8"));
+    const curated = yieldsFile.stats || {};
+    const xlmPrice = await getXLMPrice();
+
+    const stats = {};
+    for (const cat of (catalog.categories || [])) {
+      for (const a of (cat.assets || [])) {
+        const slug = rwaSlugServer(a);
+        const entry = {
+          yield7d: null,
+          marketCap: null,
+          supplyTokens: null,
+          asOf: null,
+          source: null,
+        };
+        // Layer 1: curated values
+        const c = curated[slug];
+        if (c) {
+          entry.yield7d = c.yield7d || null;
+          entry.marketCap = c.marketCap || null;
+          entry.asOf = c.asOf || null;
+          entry.source = c.source || null;
+        }
+        // Layer 2: live Horizon market cap (classic assets only) — overrides curated
+        if (a.issuer && a.code) {
+          const live = await fetchClassicMarketCap(a.code, a.issuer, xlmPrice);
+          if (live) {
+            entry.supplyTokens = live.supply;
+            if (live.marketCapUSD) {
+              entry.marketCap = formatBigUSD(live.marketCapUSD);
+              entry.source = entry.source ? `${entry.source} + Horizon` : "Horizon";
+              entry.asOf = new Date().toISOString().slice(0, 10);
+            }
+          }
+        }
+        stats[slug] = entry;
+      }
+    }
+
+    const payload = { stats, asOf: new Date().toISOString() };
+    rwaStatsCache = { ts: Date.now(), payload };
+    res.json(payload);
+  } catch (e) {
+    console.error("RWA stats error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Multi-Wallet Portfolio API ───────────────────────────────────────────────
 
 // List all tracked wallets

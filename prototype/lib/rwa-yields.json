@@ -1,0 +1,48 @@
+{
+  "_note": "Manually curated yield + market cap values per RWA asset. Keyed by slug = lowercased {code}-{first6charsOfIssuerOrContract}. When updating: set the value, bump asOf to today's ISO date, and set source so the UI can credit it. null hides the value (UI renders '—'). Live market caps from Horizon are computed for classic Stellar assets at the server and override anything set here.",
+  "_extensionPath": "To replace manual values with a scraper, add a fetcher in server.js that overwrites these at runtime before the response is returned. The frontend doesn't care where the data came from.",
+  "stats": {
+    "benji-gbhngl": {
+      "yield7d": "3.49%",
+      "marketCap": "$822M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz"
+    },
+    "usdy-gajmpx": {
+      "yield7d": null,
+      "marketCap": null,
+      "asOf": null,
+      "source": null
+    },
+    "cetes-gcryug": {
+      "yield7d": null,
+      "marketCap": null,
+      "asOf": null,
+      "source": null
+    },
+    "eutbl-cbgv2q": {
+      "yield7d": null,
+      "marketCap": null,
+      "asOf": null,
+      "source": null
+    },
+    "uktbl-cdt3ku": {
+      "yield7d": null,
+      "marketCap": null,
+      "asOf": null,
+      "source": null
+    },
+    "solvbtc-cbijbd": {
+      "yield7d": null,
+      "marketCap": null,
+      "asOf": null,
+      "source": null
+    },
+    "xsolvbtc-caup7n": {
+      "yield7d": null,
+      "marketCap": null,
+      "asOf": null,
+      "source": null
+    }
+  }
+}
