@@ -892,6 +892,103 @@
       color: var(--text-muted);
     }
 
+    .wallet-panel-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .share-btn {
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .share-btn:hover {
+      background: var(--bg-hover, var(--border));
+      color: var(--text-primary);
+      border-color: var(--stellar-blue);
+    }
+
+    .share-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .share-modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      max-width: 560px;
+      width: 90%;
+      box-shadow: var(--shadow-card);
+    }
+    .share-modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .share-modal-sub {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+    .share-modal-url {
+      width: 100%;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      box-sizing: border-box;
+      word-break: break-all;
+      max-height: 120px;
+      overflow-y: auto;
+      user-select: all;
+    }
+    .share-modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+
+    .share-banner {
+      background: var(--bg-card);
+      border: 1px solid var(--stellar-blue);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .share-banner-text {
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+    .share-banner-actions {
+      display: flex;
+      gap: 8px;
+    }
+
     .wallet-list {
       display: flex;
       flex-direction: column;
@@ -3017,7 +3114,14 @@
       }
     }
 
-    window.addEventListener("load", () => {
+    window.addEventListener("load", async () => {
+      // Shared portfolio link beats everything else.
+      const importParams = new URLSearchParams(location.search);
+      if (importParams.has("import")) {
+        const loaded = await loadSharedPortfolio();
+        if (loaded) return;
+      }
+
       // Honor deep-links to #/rwas or #/rwa/{slug} before loading leaderboards.
       const { page, slug } = pageFromHash();
       if (page === "rwas") {
@@ -3037,6 +3141,132 @@
         loadPortfolioWhales();
       }, 500);
     });
+
+    // ── Portfolio sharing via URL ──────────────────────────────
+    // Click Share -> URL with wallet list embedded (base64url JSON).
+    // Recipient opens the URL -> app loads those wallets read-only with
+    // a banner. They can click "Save to my portfolio" to add the wallets
+    // to their own list, or "Dismiss" to drop the shared view.
+
+    let sharedView = { active: false, name: null, wallets: null };
+
+    function base64urlEncode(str) {
+      return btoa(unescape(encodeURIComponent(str)))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+    }
+
+    function base64urlDecode(s) {
+      try {
+        const padded = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice(0, (4 - s.length % 4) % 4);
+        return decodeURIComponent(escape(atob(padded)));
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function escapeShareHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[c]);
+    }
+
+    function buildShareUrl() {
+      if (!walletList || walletList.length === 0) return null;
+      const payload = {
+        v: 1,
+        name: "Shared portfolio",
+        wallets: walletList.map((w) => ({ a: w.address, l: w.label || null })),
+      };
+      const encoded = base64urlEncode(JSON.stringify(payload));
+      const base = `${location.origin}${location.pathname}`;
+      return `${base}?import=${encoded}`;
+    }
+
+    function openShareModal() {
+      const url = buildShareUrl();
+      if (!url) {
+        alert("No wallets to share — add at least one wallet first.");
+        return;
+      }
+      const backdrop = document.createElement("div");
+      backdrop.className = "share-modal-backdrop";
+      backdrop.innerHTML = `
+        <div class="share-modal" onclick="event.stopPropagation()">
+          <div class="share-modal-title">Share this portfolio</div>
+          <div class="share-modal-sub">Anyone with this link can see the same wallets, positions, and balances. Read-only — they can choose to save into their own portfolio.</div>
+          <div class="share-modal-url" id="shareModalUrl">${escapeShareHtml(url)}</div>
+          <div class="share-modal-actions">
+            <button class="share-btn" id="shareCopyBtn">Copy link</button>
+            <button class="share-btn" id="shareCloseBtn">Close</button>
+          </div>
+        </div>
+      `;
+      backdrop.onclick = () => backdrop.remove();
+      document.body.appendChild(backdrop);
+      document.getElementById("shareCopyBtn").onclick = (e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(url).then(() => {
+          const btn = document.getElementById("shareCopyBtn");
+          btn.textContent = "Copied!";
+          setTimeout(() => { if (btn) btn.textContent = "Copy link"; }, 1500);
+        }).catch(() => alert("Copy failed — select the URL and copy manually."));
+      };
+      document.getElementById("shareCloseBtn").onclick = () => backdrop.remove();
+    }
+
+    function readImportFromUrl() {
+      const params = new URLSearchParams(location.search);
+      const enc = params.get("import");
+      if (!enc) return null;
+      const json = base64urlDecode(enc);
+      if (!json) return null;
+      try {
+        const payload = JSON.parse(json);
+        if (!Array.isArray(payload.wallets) || payload.wallets.length === 0) return null;
+        const wallets = payload.wallets
+          .map((w) => ({ address: w.a || w.address, label: w.l || w.label || null }))
+          .filter((w) => w.address && /^G[A-Z2-7]{55}$/.test(w.address));
+        if (wallets.length === 0) return null;
+        return { name: payload.name || "Shared portfolio", wallets };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    async function loadSharedPortfolio() {
+      const imported = readImportFromUrl();
+      if (!imported) return false;
+      sharedView = { active: true, name: imported.name, wallets: imported.wallets };
+      walletList = imported.wallets.map((w) => ({ address: w.address, label: w.label }));
+      activeView = "all";
+      multiWalletMode = true;
+      await loadMultiWalletPortfolio();
+      return true;
+    }
+
+    async function saveSharedWallets() {
+      if (!sharedView.active) return;
+      const toAdd = sharedView.wallets.slice();
+      let added = 0;
+      let skipped = 0;
+      for (const w of toAdd) {
+        const ok = await addWalletToPortfolio(w.address, w.label);
+        if (ok) added++;
+        else skipped++;
+      }
+      sharedView = { active: false, name: null, wallets: null };
+      history.replaceState(null, "", location.pathname);
+      await loadMultiWalletPortfolio();
+      alert(`Saved ${added} wallet${added !== 1 ? "s" : ""}${skipped > 0 ? ` (${skipped} skipped — already in list or invalid)` : ""}.`);
+    }
+
+    function dismissSharedView() {
+      sharedView = { active: false, name: null, wallets: null };
+      history.replaceState(null, "", location.pathname);
+      location.reload();
+    }
 
     // ── Multi-Wallet Management ────────────────────────────────
 
@@ -3140,11 +3370,26 @@
       if (!d) return;
 
       // Wallet panel
-      let walletPanelHTML = `
+      const sharedBannerHTML = sharedView.active ? `
+        <div class="share-banner">
+          <div class="share-banner-text">
+            Viewing <strong>${escapeShareHtml(sharedView.name || "Shared portfolio")}</strong> &middot; ${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""} &middot; read-only
+          </div>
+          <div class="share-banner-actions">
+            <button class="share-btn" onclick="saveSharedWallets()">Save to my portfolio</button>
+            <button class="share-btn" onclick="dismissSharedView()">Dismiss</button>
+          </div>
+        </div>
+      ` : "";
+
+      let walletPanelHTML = sharedBannerHTML + `
         <div class="wallet-panel">
           <div class="wallet-panel-header">
-            <div class="wallet-panel-title">My Wallets</div>
-            <div class="wallet-panel-count">${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""}</div>
+            <div class="wallet-panel-title">${sharedView.active ? "Shared Wallets" : "My Wallets"}</div>
+            <div class="wallet-panel-actions">
+              ${!sharedView.active ? '<button class="share-btn" onclick="openShareModal()" title="Share this portfolio as a link"><span aria-hidden="true">&#x1F517;</span> Share</button>' : ""}
+              <span class="wallet-panel-count">${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""}</span>
+            </div>
           </div>
           <div class="wallet-list">
       `;
@@ -3185,22 +3430,25 @@
               <div class="wallet-item-value">${fmtBigUSD(w.totalValueUSD)}</div>
               <div class="wallet-item-assets">${pct}% · ${w.balanceCount} assets</div>
             </div>
-            <button class="wallet-item-remove" onclick="removeWalletFromPortfolio('${w.address}', event)" title="Remove wallet">×</button>
+            ${sharedView.active ? "" : `<button class="wallet-item-remove" onclick="removeWalletFromPortfolio('${w.address}', event)" title="Remove wallet">&times;</button>`}
           </div>
         `;
       });
 
       walletPanelHTML += `</div>`; // wallet-list
 
-      // Add wallet form
-      walletPanelHTML += `
-        <div class="wallet-add-form">
-          <input type="text" id="walletLabelInput" placeholder="Label (optional)" style="max-width:150px" />
-          <input type="text" id="walletAddInput" placeholder="Stellar address (G...)" spellcheck="false"
-            onkeydown="if(event.key==='Enter')handleAddWallet()" />
-          <button class="btn" onclick="handleAddWallet()">Add</button>
-        </div>
-      </div>`;
+      // Add wallet form — hidden when viewing a shared portfolio (read-only).
+      if (!sharedView.active) {
+        walletPanelHTML += `
+          <div class="wallet-add-form">
+            <input type="text" id="walletLabelInput" placeholder="Label (optional)" style="max-width:150px" />
+            <input type="text" id="walletAddInput" placeholder="Stellar address (G...)" spellcheck="false"
+              onkeydown="if(event.key==='Enter')handleAddWallet()" />
+            <button class="btn" onclick="handleAddWallet()">Add</button>
+          </div>
+        `;
+      }
+      walletPanelHTML += `</div>`;
 
       // If in time-travel mode, show historical view instead of live
       if (timeTravelDate && timeTravelSnapshot) {
