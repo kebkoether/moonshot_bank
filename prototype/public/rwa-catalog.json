@@ -14,9 +14,9 @@
   },
   "categories": [
     {
-      "id": "treasuries",
-      "name": "Tokenized Treasuries",
-      "description": "Tokenized government debt instruments and treasury-backed money market funds.",
+      "id": "us-treasuries",
+      "name": "U.S. Tokenized Treasuries",
+      "description": "USD-denominated U.S. government debt and treasury-backed money market funds.",
       "assets": [
         {
           "code": "BENJI",
@@ -50,7 +50,14 @@
           "yield7d": null,
           "marketCap": null,
           "venues": []
-        },
+        }
+      ]
+    },
+    {
+      "id": "intl-treasuries",
+      "name": "International Tokenized Treasuries",
+      "description": "Non-U.S. sovereign debt instruments (EU, UK, Mexico, etc.).",
+      "assets": [
         {
           "code": "CETES",
           "issuer": "GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC",
