@@ -9,28 +9,28 @@
       "source": "rwa.xyz"
     },
     "usdy-gajmpx": {
-      "yield7d": null,
+      "yield7d": "3.55%",
       "marketCap": null,
-      "asOf": null,
-      "source": null
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz"
     },
     "cetes-gcryug": {
-      "yield7d": null,
+      "yield7d": "4.88%",
       "marketCap": null,
-      "asOf": null,
-      "source": null
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz"
     },
     "eutbl-cbgv2q": {
-      "yield7d": null,
-      "marketCap": null,
-      "asOf": null,
-      "source": null
+      "yield7d": "1.95%",
+      "marketCap": "$925M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (all chains)"
     },
     "uktbl-cdt3ku": {
-      "yield7d": null,
-      "marketCap": null,
-      "asOf": null,
-      "source": null
+      "yield7d": "3.41%",
+      "marketCap": "$20M",
+      "asOf": "2026-06-18",
+      "source": "rwa.xyz (all chains)"
     },
     "solvbtc-cbijbd": {
       "yield7d": null,
