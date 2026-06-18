@@ -15,6 +15,7 @@ const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
+const UpshiftAdapter = require("./lib/adapters/upshift");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
@@ -42,6 +43,7 @@ const PROTOCOL_ADAPTERS = [
   TemplarAdapter,
   SushiSwapV3Adapter,
   SolvProtocolAdapter,
+  UpshiftAdapter,
 ];
 
 // ── Price Engine ──────────────────────────────────────────────────────────────
@@ -286,7 +288,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
     for (const adapter of PROTOCOL_ADAPTERS) {
       if (!adapter.isConfigured()) continue;
       try {
-        const positions = await adapter.getPositions(address);
+        const positions = await adapter.getPositions(address, { xlmPrice });
         for (const pos of positions) {
           totalValueUSD += pos.valueUSD || 0;
           defiPositions.push(pos);
@@ -537,11 +539,12 @@ app.get("/api/v1/account/:address/defi", async (req, res) => {
   try {
     const { address } = req.params;
     const allPositions = [];
+    const xlmPrice = await getXLMPrice();
 
     for (const adapter of PROTOCOL_ADAPTERS) {
       if (!adapter.isConfigured()) continue;
       try {
-        const positions = await adapter.getPositions(address);
+        const positions = await adapter.getPositions(address, { xlmPrice });
         allPositions.push(...positions);
       } catch (e) {
         console.error(`${adapter.name} error:`, e.message);
@@ -1008,7 +1011,7 @@ app.post("/api/v1/portfolio", async (req, res) => {
         for (const adapter of PROTOCOL_ADAPTERS) {
           if (!adapter.isConfigured()) continue;
           try {
-            const positions = await adapter.getPositions(address);
+            const positions = await adapter.getPositions(address, { xlmPrice });
             for (const pos of positions) {
               walletTotalUSD += pos.valueUSD || 0;
               defiPositions.push(pos);
@@ -1521,7 +1524,7 @@ async function fetchPortfolioForScheduler(address) {
   for (const adapter of PROTOCOL_ADAPTERS) {
     if (!adapter.isConfigured()) continue;
     try {
-      const positions = await adapter.getPositions(address);
+      const positions = await adapter.getPositions(address, { xlmPrice });
       for (const pos of positions) {
         totalValueUSD += pos.valueUSD || 0;
         defiPositions.push(pos);

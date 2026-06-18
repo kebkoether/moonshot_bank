@@ -4259,9 +4259,11 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const otherPositions = positions.filter(p => p.protocol !== "blend");
       otherPositions.forEach((pos) => {
         const protocolIcon = pos.protocol === "sushiswap-v3" ? "sushi"
-          : pos.protocol === "solv-protocol" ? "solv" : "default";
+          : pos.protocol === "solv-protocol" ? "solv"
+          : pos.protocol === "upshift" ? "upshift" : "default";
         const protocolLabel = pos.protocol === "sushiswap-v3" ? "SushiSwap V3"
-          : pos.protocol === "solv-protocol" ? "Solv Protocol" : pos.protocol;
+          : pos.protocol === "solv-protocol" ? "Solv Protocol"
+          : pos.protocol === "upshift" ? (pos.vaultName ? `Upshift · ${pos.vaultName}` : "Upshift") : pos.protocol;
         const typeLabel = pos.type.replace(/_/g, " ");
 
         html += `<div class="defi-card">`;

@@ -30,49 +30,9 @@ const SOROBAN_TOKEN_REGISTRY = [
     coingeckoId: "bitcoin",
     enabled: !!process.env.SOLVBTC_BBN_CONTRACT_ID,
   },
-  // ── Upshift Finance Stellar vaults ─────────────────────────────────────────
-  // Contract addresses sourced from https://api.upshift.finance/v1/tokenized_vaults
-  // filtered by chain_type === "stellar". The vault contract IS the share-token
-  // contract (ERC-4626-style), so the user's balance of the vault contract
-  // equals their position in share units. We price share 1:1 with the deposit
-  // token here — this ignores accrued yield (small at current APYs), refine
-  // later with a real adapter that calls convert_to_assets.
-  {
-    contractId: "CCL3WITWFFXIHV2I52ECV5DPIEOFSTU3PBPR53ILPLF2IP5KHECXRUTY",
-    symbol: "earnUSDC",
-    name: "Gami earnUSDC (Upshift)",
-    decimals: 13,
-    category: "vault",
-    coingeckoId: "usd-coin",
-    enabled: true,
-  },
-  {
-    contractId: "CAI2TYZGVKLQ4CHSMHPHWXZVQFX5SHKJA2Q3WUQVUBI73NGL6SHVAK4L",
-    symbol: "avXLM",
-    name: "Upshift Stellar XLM Vault",
-    decimals: 13,
-    category: "vault",
-    coingeckoId: "stellar",
-    enabled: true,
-  },
-  {
-    contractId: "CC6TRAPQD3NK7THUKWPV5SL2JHKQGNXZVB6S6MVYFSLRWAKEFUWZKZ7J",
-    symbol: "earnXLM",
-    name: "Gami earnXLM (Upshift)",
-    decimals: 13,
-    category: "vault",
-    coingeckoId: "stellar",
-    enabled: true,
-  },
-  {
-    contractId: "CBOAUJOUVV4YKIHKEGKSP66LMEYPL4PZWGF5GNQJVJMY4Q35BSDDWUP2",
-    symbol: "GamiTestUSDC",
-    name: "Gami earnUSDC Test (Upshift)",
-    decimals: 13,
-    category: "vault",
-    coingeckoId: "usd-coin",
-    enabled: true,
-  },
+  // Upshift Finance Stellar vaults are tracked by the UpshiftAdapter
+  // (lib/adapters/upshift.js) so they appear as DeFi positions instead of
+  // plain token balances. Don't add them here too — that would double-count.
 
   // Add more Soroban tokens here as they deploy on Stellar:
   // {
