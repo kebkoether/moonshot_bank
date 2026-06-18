@@ -2761,7 +2761,11 @@
         await renderRwaDetailPage(slug);
         return;
       }
-      if (page !== currentPage) switchPage(page);
+      // Always re-render rather than gating on currentPage equality.
+      // We might be coming from a detail view where currentPage is already
+      // "rwas" but the rendered content is the detail page — gating here
+      // would silently swallow the back navigation.
+      await switchPage(page);
     });
 
     // ── State ──────────────────────────────────────────────────
