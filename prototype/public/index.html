@@ -1974,15 +1974,31 @@
 
     .rwa-asset-row {
       display: grid;
-      grid-template-columns: 110px 1fr 220px;
+      grid-template-columns: 110px 1fr 90px 220px;
       gap: 16px;
       align-items: center;
       padding: 12px 20px;
       border-top: 1px solid var(--border);
       font-size: 14px;
+      color: var(--text-primary);
+      text-decoration: none;
+      transition: background 0.12s;
     }
 
+    .rwa-asset-row:hover { background: var(--bg-secondary); }
     .rwa-asset-row:first-of-type { border-top: none; }
+
+    .rwa-asset-yield {
+      font-size: 14px;
+      font-weight: 600;
+      text-align: right;
+      color: var(--green, #10b981);
+    }
+
+    .rwa-asset-yield.empty {
+      color: var(--text-muted);
+      font-weight: 400;
+    }
 
     .rwa-asset-code {
       font-weight: 700;
@@ -2033,6 +2049,150 @@
         gap: 4px;
       }
       .rwa-asset-address { text-align: left; }
+      .rwa-asset-yield { text-align: left; }
+    }
+
+    .rwa-detail {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .rwa-detail-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+
+    .rwa-detail-back:hover { color: var(--text-primary); }
+
+    .rwa-detail-header {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+
+    .rwa-detail-code {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .rwa-detail-issuer {
+      font-size: 16px;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+    }
+
+    .rwa-detail-description {
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--text-primary);
+      margin-bottom: 24px;
+      max-width: 700px;
+    }
+
+    .rwa-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .rwa-stat {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+
+    .rwa-stat-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .rwa-stat-value {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .rwa-stat-value.muted { color: var(--text-muted); font-weight: 400; }
+    .rwa-stat-value.yield { color: var(--green, #10b981); }
+
+    .rwa-section-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin: 24px 0 8px;
+    }
+
+    .rwa-address-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      overflow: hidden;
+    }
+
+    .rwa-address-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-secondary);
+    }
+
+    .rwa-address-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .rwa-link-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+    }
+
+    .rwa-link-btn:hover {
+      background: var(--bg-hover, var(--border));
+      border-color: var(--stellar-blue);
+    }
+
+    .rwa-venues {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .rwa-venues-empty {
+      color: var(--text-muted);
+      font-size: 13px;
+      font-style: italic;
     }
     @keyframes tickerScroll {
       from { transform: translateX(0); }
@@ -2329,18 +2489,39 @@
       }
     }
 
+    // Build a stable, URL-safe slug for an asset. Used in #/rwa/{slug}.
+    function rwaSlug(a) {
+      const id = (a.issuer || a.contractId || "").toLowerCase().slice(0, 6);
+      return `${(a.code || "").toLowerCase()}-${id}`;
+    }
+
+    // Find an asset by slug across all categories. Returns {asset, category} or null.
+    function findRwaBySlug(slug) {
+      if (!rwaCatalog) return null;
+      for (const cat of (rwaCatalog.categories || [])) {
+        for (const a of (cat.assets || [])) {
+          if (rwaSlug(a) === slug) return { asset: a, category: cat };
+        }
+      }
+      return null;
+    }
+
+    async function ensureCatalog() {
+      if (rwaCatalog) return rwaCatalog;
+      const res = await fetch("/rwa-catalog.json");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      rwaCatalog = await res.json();
+      return rwaCatalog;
+    }
+
     async function renderRwasPage() {
       const app = document.getElementById("app");
-      if (!rwaCatalog) {
-        app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="rwa-page-subtitle">Loading catalog…</div></div>`;
-        try {
-          const res = await fetch("/rwa-catalog.json");
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          rwaCatalog = await res.json();
-        } catch (e) {
-          app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="error-banner">Failed to load catalog: ${e.message}</div></div>`;
-          return;
-        }
+      app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="rwa-page-subtitle">Loading catalog…</div></div>`;
+      try {
+        await ensureCatalog();
+      } catch (e) {
+        app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="error-banner">Failed to load catalog: ${escapeHtml(e.message)}</div></div>`;
+        return;
       }
 
       const categories = (rwaCatalog.categories || []);
@@ -2372,15 +2553,20 @@
             const kindBadge = isSoroban
               ? `<span class="rwa-asset-kind-badge">Soroban</span>`
               : `<span class="rwa-asset-kind-badge">Classic</span>`;
+            const yieldHtml = a.yield7d
+              ? `<div class="rwa-asset-yield">${escapeHtml(a.yield7d)}</div>`
+              : `<div class="rwa-asset-yield empty">—</div>`;
+            const href = `#/rwa/${rwaSlug(a)}`;
             html += `
-              <div class="rwa-asset-row">
+              <a class="rwa-asset-row" href="${href}">
                 <div class="rwa-asset-code">${escapeHtml(a.code)}${kindBadge}</div>
                 <div>
                   <div class="rwa-asset-issuer">${escapeHtml(a.issuerName || "Unknown issuer")}</div>
                   ${a.notes ? `<div class="rwa-asset-notes">${escapeHtml(a.notes)}</div>` : ""}
                 </div>
+                ${yieldHtml}
                 <div class="rwa-asset-address" title="${escapeHtml(address)}">${escapeHtml(address)}</div>
-              </div>
+              </a>
             `;
           }
         }
@@ -2390,6 +2576,117 @@
 
       html += `</div>`;
       app.innerHTML = html;
+    }
+
+    // Returns the Stellar Expert URL for an asset (classic OR Soroban).
+    function stellarExpertUrl(a) {
+      if (a.contractId) return `https://stellar.expert/explorer/public/contract/${a.contractId}`;
+      if (a.issuer) return `https://stellar.expert/explorer/public/asset/${a.code}-${a.issuer}`;
+      return null;
+    }
+
+    async function renderRwaDetailPage(slug) {
+      const app = document.getElementById("app");
+      app.innerHTML = `<div class="rwa-detail"><a href="#/rwas" class="rwa-detail-back">← Back to RWAs</a><div>Loading…</div></div>`;
+      try {
+        await ensureCatalog();
+      } catch (e) {
+        app.innerHTML = `<div class="rwa-detail"><a href="#/rwas" class="rwa-detail-back">← Back to RWAs</a><div class="error-banner">Failed to load catalog: ${escapeHtml(e.message)}</div></div>`;
+        return;
+      }
+      const hit = findRwaBySlug(slug);
+      if (!hit) {
+        app.innerHTML = `<div class="rwa-detail"><a href="#/rwas" class="rwa-detail-back">← Back to RWAs</a><div class="error-banner">Asset not found: ${escapeHtml(slug)}</div></div>`;
+        return;
+      }
+      const { asset: a, category } = hit;
+      const isSoroban = !!a.contractId;
+      const address = a.issuer || a.contractId || "";
+      const expertUrl = stellarExpertUrl(a);
+
+      // Combine curated venues with auto-added Stellar Expert
+      const venues = [...(a.venues || [])];
+      if (expertUrl && !venues.some(v => /stellar\.expert/i.test(v.url || ""))) {
+        venues.push({ name: "Stellar Expert", url: expertUrl });
+      }
+
+      const yieldStatHtml = a.yield7d
+        ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield7d)}</div>`
+        : `<div class="rwa-stat-value muted">—</div>`;
+      const marketCapStatHtml = a.marketCap
+        ? `<div class="rwa-stat-value">${escapeHtml(a.marketCap)}</div>`
+        : `<div class="rwa-stat-value muted">—</div>`;
+
+      let html = `
+        <div class="rwa-detail">
+          <a href="#/rwas" class="rwa-detail-back">← Back to RWAs</a>
+          <div class="rwa-detail-header">
+            <div class="rwa-detail-code">${escapeHtml(a.code)}</div>
+            <span class="rwa-asset-kind-badge">${isSoroban ? "Soroban" : "Classic"}</span>
+            <span class="rwa-asset-kind-badge">${escapeHtml(category.name)}</span>
+          </div>
+          <div class="rwa-detail-issuer">
+            ${a.issuerUrl
+              ? `<a href="${escapeHtml(a.issuerUrl)}" target="_blank" rel="noopener" style="color:var(--stellar-blue);text-decoration:none;">${escapeHtml(a.issuerName || "Unknown issuer")} ↗</a>`
+              : escapeHtml(a.issuerName || "Unknown issuer")}
+          </div>
+      `;
+
+      if (a.description) {
+        html += `<div class="rwa-detail-description">${escapeHtml(a.description)}</div>`;
+      }
+
+      html += `
+          <div class="rwa-stats">
+            <div class="rwa-stat">
+              <div class="rwa-stat-label">7-day Yield</div>
+              ${yieldStatHtml}
+            </div>
+            <div class="rwa-stat">
+              <div class="rwa-stat-label">Market Cap</div>
+              ${marketCapStatHtml}
+            </div>
+            <div class="rwa-stat">
+              <div class="rwa-stat-label">Type</div>
+              <div class="rwa-stat-value">${isSoroban ? "Soroban" : "Classic"}</div>
+            </div>
+          </div>
+
+          <div class="rwa-section-title">${isSoroban ? "Contract Address" : "Issuer Address"}</div>
+          <div class="rwa-address-row">
+            <div class="rwa-address-text" title="${escapeHtml(address)}">${escapeHtml(address)}</div>
+            <div class="rwa-address-actions">
+              <button class="rwa-link-btn" onclick="copyToClipboard('${escapeHtml(address)}', this)">Copy</button>
+              ${expertUrl ? `<a class="rwa-link-btn" href="${expertUrl}" target="_blank" rel="noopener">Stellar Expert ↗</a>` : ""}
+            </div>
+          </div>
+
+          <div class="rwa-section-title">Liquidity Venues</div>
+      `;
+
+      if (venues.length === 0) {
+        html += `<div class="rwa-venues-empty">No venues listed yet — add them to the asset's <code>venues</code> array in rwa-catalog.json.</div>`;
+      } else {
+        html += `<div class="rwa-venues">`;
+        for (const v of venues) {
+          if (!v.url) continue;
+          html += `<a class="rwa-link-btn" href="${escapeHtml(v.url)}" target="_blank" rel="noopener">${escapeHtml(v.name || v.url)} ↗</a>`;
+        }
+        html += `</div>`;
+      }
+
+      html += `</div>`;
+      app.innerHTML = html;
+    }
+
+    function copyToClipboard(text, btn) {
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => { btn.textContent = orig; }, 1200);
+      }).catch(() => {
+        alert("Copy failed — select the text manually.");
+      });
     }
 
     function escapeHtml(s) {
@@ -2402,8 +2699,25 @@
       })[c]);
     }
 
-    window.addEventListener("hashchange", () => {
-      const page = location.hash === "#/rwas" ? "rwas" : "portfolio";
+    function pageFromHash() {
+      const h = location.hash || "";
+      if (h === "#/rwas") return { page: "rwas" };
+      const m = h.match(/^#\/rwa\/(.+)$/);
+      if (m) return { page: "rwa-detail", slug: m[1] };
+      return { page: "portfolio" };
+    }
+
+    window.addEventListener("hashchange", async () => {
+      const { page, slug } = pageFromHash();
+      if (page === "rwa-detail") {
+        // Detail pages still belong under the RWAs tab visually
+        currentPage = "rwas";
+        document.querySelectorAll(".page-nav-tab").forEach((t) => {
+          t.classList.toggle("active", t.getAttribute("data-page") === "rwas");
+        });
+        await renderRwaDetailPage(slug);
+        return;
+      }
       if (page !== currentPage) switchPage(page);
     });
 
@@ -2646,9 +2960,18 @@
     }
 
     window.addEventListener("load", () => {
-      // Honor deep-links to #/rwas immediately, before the welcome leaderboards load.
-      if (location.hash === "#/rwas") {
+      // Honor deep-links to #/rwas or #/rwa/{slug} before loading leaderboards.
+      const { page, slug } = pageFromHash();
+      if (page === "rwas") {
         switchPage("rwas");
+        return;
+      }
+      if (page === "rwa-detail") {
+        currentPage = "rwas";
+        document.querySelectorAll(".page-nav-tab").forEach((t) => {
+          t.classList.toggle("active", t.getAttribute("data-page") === "rwas");
+        });
+        renderRwaDetailPage(slug);
         return;
       }
       setTimeout(() => {

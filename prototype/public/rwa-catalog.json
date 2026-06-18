@@ -1,5 +1,17 @@
 {
-  "_note": "Issuer addresses and contract IDs are sourced from prototype/lib/tracked-assets.js (used in production). Empty categories are placeholders — fill in when verified issuers are known. To add an asset: pick the right category, add an entry with code/issuer (classic) or contractId (Soroban), issuerName, and optional notes.",
+  "_note": "Issuer addresses are sourced from prototype/lib/tracked-assets.js. To add an asset: pick the right category, add an entry with code/issuer (classic) or contractId (Soroban), issuerName, and optional fields. yield7d and marketCap default to null — leave null until you've verified with the issuer; the UI renders '—'. venues auto-includes a Stellar Expert link if omitted.",
+  "_fieldDocs": {
+    "code": "Asset symbol shown to users (e.g., 'BENJI').",
+    "issuer": "G... address for classic Stellar assets. Set this OR contractId, not both.",
+    "contractId": "C... address for Soroban tokens. Set this OR issuer, not both.",
+    "issuerName": "Display name for the issuing entity.",
+    "issuerUrl": "Official issuer website. Opens in a new tab.",
+    "description": "1-3 sentence summary shown on the detail page.",
+    "notes": "Short tagline shown in the list view.",
+    "yield7d": "Average 7-day yield as a string (e.g., '5.21%'). null hides the value.",
+    "marketCap": "Market cap as a string (e.g., '$700M'). null hides the value.",
+    "venues": "Array of {name, url} for trading/liquidity venues. Stellar Expert is auto-added."
+  },
   "categories": [
     {
       "id": "mmf",
@@ -10,7 +22,12 @@
           "code": "BENJI",
           "issuer": "GBHNGLLIE3KWGKCHIKMHJ5HVZHYIK7WTBE4QF5PLAKL4CJGSEU7HZIW5",
           "issuerName": "Franklin Templeton",
-          "notes": "Franklin OnChain U.S. Government Money Fund"
+          "issuerUrl": "https://www.franklintempleton.com/articles/strategist-views/putting-our-money-market-fund-on-the-blockchain",
+          "description": "The Franklin OnChain U.S. Government Money Fund (FOBXX) is the first U.S.-registered mutual fund to use a public blockchain for transactions and shareholder ownership. Each BENJI token represents one share of the fund, which invests in U.S. government securities, cash, and repurchase agreements.",
+          "notes": "Franklin OnChain U.S. Government Money Fund",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         }
       ]
     },
@@ -23,25 +40,45 @@
           "code": "USDY",
           "issuer": "GAJMPX5NBOG6TQFPQGRABJEEB2YE7RFRLUKJDZAZGAD5GFX4J7TADAZ6",
           "issuerName": "Ondo Finance",
-          "notes": "Yield-bearing USD"
+          "issuerUrl": "https://ondo.finance/usdy",
+          "description": "Ondo's yield-bearing tokenized note backed by short-term U.S. Treasuries and bank deposits. USDY accrues yield natively — the per-token price increases daily as interest is earned.",
+          "notes": "Yield-bearing USD",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "CETES",
           "issuer": "GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC",
           "issuerName": "Etherfuse",
-          "notes": "Mexican government T-bills (MXN-denominated)"
+          "issuerUrl": "https://www.etherfuse.com",
+          "description": "Tokenized Mexican government Treasury bills (Certificados de la Tesoreria de la Federacion), denominated in MXN. Issued by Etherfuse to give global investors exposure to short-term Mexican sovereign debt.",
+          "notes": "Mexican T-bills (MXN-denominated)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "EUTBL",
           "contractId": "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF",
           "issuerName": "Spiko",
-          "notes": "EU T-bills (EUR-denominated, Soroban)"
+          "issuerUrl": "https://www.spiko.io",
+          "description": "Tokenized share of Spiko's European T-bill money market fund, denominated in EUR. The fund holds a portfolio of euro-area government short-term debt and tracks a daily NAV.",
+          "notes": "EU T-bills (EUR-denominated, Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "UKTBL",
           "contractId": "CDT3KU6TQZNOHKNOHNAFFDQZDURVC3MSTL4ML7TUTZGNOPBZCLABP4FR",
           "issuerName": "Spiko",
-          "notes": "UK T-bills (GBP-denominated, Soroban)"
+          "issuerUrl": "https://www.spiko.io",
+          "description": "Tokenized share of Spiko's UK T-bill money market fund, denominated in GBP. Holds short-term UK government securities and tracks a daily NAV.",
+          "notes": "UK T-bills (GBP-denominated, Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         }
       ]
     },
@@ -66,13 +103,23 @@
           "code": "SOLVBTC",
           "contractId": "CBIJBDNZNF4X35BJ4FFZWCDBSCKOP5NB4PLG4SNENRMLAPYG4P5FM6VN",
           "issuerName": "Solv Protocol",
-          "notes": "Bitcoin-denominated (Soroban)"
+          "issuerUrl": "https://solv.finance",
+          "description": "Solv Protocol's tokenized Bitcoin on Stellar Soroban. 1:1 backed BTC representation that can be used as collateral or for yield strategies across DeFi.",
+          "notes": "Bitcoin-denominated (Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "XSOLVBTC",
           "contractId": "CAUP7NFABXE5TJRL3FKTPMWRLC7IAXYDCTHQRFSCLR5TMGKHOOQO772J",
           "issuerName": "Solv Protocol",
-          "notes": "SolvBTC.BBN (Soroban)"
+          "issuerUrl": "https://solv.finance",
+          "description": "Yield-bearing variant of SolvBTC. The exchange rate vs SolvBTC drifts upward over time to reflect accrued yield from Babylon staking and other BTC yield sources.",
+          "notes": "SolvBTC.BBN — yield-bearing BTC",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         }
       ]
     },
@@ -85,31 +132,56 @@
           "code": "USDC",
           "contractId": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
           "issuerName": "Circle",
-          "notes": "USD-anchored (Soroban SAC)"
+          "issuerUrl": "https://www.circle.com/en/usdc",
+          "description": "Circle's USD-backed stablecoin, fully reserved with cash and short-dated U.S. Treasuries. The Soroban version is a wrapped SAC (Stellar Asset Contract) of the classic USDC asset.",
+          "notes": "USD-anchored (Soroban SAC)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "PYUSD",
           "contractId": "CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2",
           "issuerName": "PayPal / Paxos",
-          "notes": "USD-anchored (Soroban)"
+          "issuerUrl": "https://www.paypal.com/digital-wallet/digital-currencies/pyusd",
+          "description": "PayPal USD, a regulated USD stablecoin issued by Paxos Trust. Fully backed by USD deposits, U.S. Treasuries, and similar cash equivalents.",
+          "notes": "USD-anchored (Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "EURC",
           "issuer": "GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPP2",
           "issuerName": "Circle",
-          "notes": "EUR-anchored"
+          "issuerUrl": "https://www.circle.com/en/eurc",
+          "description": "Circle's EUR-backed stablecoin, fully reserved with cash and short-dated euro-area government debt held with regulated financial institutions.",
+          "notes": "EUR-anchored",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "EURAU",
           "contractId": "CB44W727WSLHPXJ47A6DHF5D34RKWSOZAMEDXO3CF5TEEEQ2ZX4V3VRI",
           "issuerName": "AllUnity",
-          "notes": "EUR-anchored (Soroban)"
+          "issuerUrl": "https://allunity.com",
+          "description": "AllUnity's regulated EUR stablecoin (a joint venture of DWS, Flow Traders, and Galaxy). Backed 1:1 by euro deposits at supervised European banks.",
+          "notes": "EUR-anchored (Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "EURCV",
           "contractId": "CANKBYNNAYKEZXLB655F2UPNTAZFK5HILZUXL7ZTFR3NF6LKDSVY7KFH",
           "issuerName": "SG Forge",
-          "notes": "EUR-anchored (Soroban)"
+          "issuerUrl": "https://www.sgforge.com/product/eur-coinvertible",
+          "description": "Societe Generale-Forge's EUR Coin Vertible, a MiCAR-compliant EUR stablecoin issued by a regulated French electronic money institution.",
+          "notes": "EUR-anchored (Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         }
       ]
     },
@@ -122,25 +194,45 @@
           "code": "BLND",
           "issuer": "GDJEHTBE6ZHUXSWFI642DCGLUOECLHPF3KSXHPXTSTJ7E3JF6MQ5EZYY",
           "issuerName": "Blend Protocol",
-          "notes": "Lending protocol governance"
+          "issuerUrl": "https://www.blend.capital",
+          "description": "Governance token of Blend, a permissionless lending protocol on Stellar Soroban. BLND holders vote on protocol parameters and receive a share of protocol fees.",
+          "notes": "Lending protocol governance",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "AQUA",
           "issuer": "GBNZILSTVQZ4R7IKQDGHYGY2QXL5QOFJYQMXPKWRRM5PAV7Y4M67AQUA",
           "issuerName": "Aquarius",
-          "notes": "AMM rewards token"
+          "issuerUrl": "https://aqua.network",
+          "description": "Reward and governance token of Aquarius, the Stellar SDEX market-maker incentive layer. AQUA is distributed to liquidity providers across approved trading pairs.",
+          "notes": "AMM rewards token",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "YBX",
           "issuer": "GBUYYBXWCLT2MOSSHRFCKMEDFOVSCAXNIEW424GLN666OEXHAAWBDYMX",
           "issuerName": "YieldBlox",
-          "notes": "Lending protocol governance"
+          "issuerUrl": "https://www.yieldblox.com",
+          "description": "Governance token of YieldBlox, a Stellar-based lending protocol. YBX holders vote on supported assets and protocol parameters.",
+          "notes": "Lending protocol governance",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         },
         {
           "code": "SHX",
           "issuer": "GDSTRSHXHGJ7ZIVRBXEYE5Q74XUVCUSEKEBR7UCHEUUEK72N7I7KJ6JH",
           "issuerName": "Stronghold",
-          "notes": "Exchange ecosystem token"
+          "issuerUrl": "https://stronghold.co",
+          "description": "Utility token of the Stronghold exchange and payment platform. Used for fee discounts and ecosystem rewards.",
+          "notes": "Exchange ecosystem token",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": []
         }
       ]
     }
