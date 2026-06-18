@@ -142,6 +142,8 @@
       --radius: 12px;
       /* Shadow tuned for dark backgrounds */
       --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+      /* PNG is dark — invert to white on dark backgrounds */
+      --logo-filter: invert(1);
     }
 
     :root[data-theme="light"] {
@@ -163,6 +165,14 @@
       --stellar-blue: #3b5fed;
       --radius: 12px;
       --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.08);
+      /* PNG is already dark — show as-is on light backgrounds */
+      --logo-filter: none;
+    }
+
+    .stellar-mark {
+      object-fit: contain;
+      flex-shrink: 0;
+      filter: var(--logo-filter);
     }
 
     /* The theme-toggle button itself */
@@ -2312,7 +2322,7 @@
 
   <div class="header">
     <div class="logo" onclick="goHome()" style="cursor:pointer;" title="Back to home">
-      <img src="/stellar-mark.png" alt="Stellar" style="width:30px;height:30px;object-fit:contain;filter:invert(1);flex-shrink:0;" />
+      <img src="/stellar-mark.png" alt="Stellar" class="stellar-mark" style="width:30px;height:30px;" />
       Stellar Scope
     </div>
     <div class="search-container">
@@ -2363,7 +2373,7 @@
   <div class="main" id="app">
     <div class="welcome" id="welcomeState">
       <h1 style="display:flex;align-items:center;gap:16px;justify-content:center;">
-        <img src="/stellar-mark.png" alt="Stellar" style="width:54px;height:54px;object-fit:contain;filter:invert(1);flex-shrink:0;" />
+        <img src="/stellar-mark.png" alt="Stellar" class="stellar-mark" style="width:54px;height:54px;" />
         Stellar Scope
       </h1>
 
