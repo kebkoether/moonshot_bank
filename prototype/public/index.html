@@ -44,11 +44,19 @@
     / window.connectWalletViaModal which this module installs on window.
   -->
   <script type="module">
-    import { StellarWalletsKit, Networks } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0";
-    import { FreighterModule, FREIGHTER_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/freighter";
+    // Freighter + LOBSTR need ?bundle because their underlying npm packages
+    // (@stellar/freighter-api, @lobstrco/signer-extension-api) only expose a
+    // default export on esm.sh, while the kit imports named members from
+    // them. Without bundling, the module fails with a SyntaxError that
+    // takes the whole <script type="module"> down with it.
+    //
+    // xBull stays unbundled because esbuild fails to bundle its tslib helper
+    // (__spreadArray); the raw import works fine on its own.
+    import { StellarWalletsKit, Networks } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0?bundle";
+    import { FreighterModule, FREIGHTER_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/freighter?bundle";
+    import { LobstrModule, LOBSTR_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/lobstr?bundle";
     import { xBullModule, XBULL_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/xbull";
     import { AlbedoModule, ALBEDO_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/albedo";
-    import { LobstrModule, LOBSTR_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/lobstr";
     import { HanaModule, HANA_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/hana";
     import { RabetModule, RABET_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/rabet";
 
