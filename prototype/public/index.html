@@ -85,17 +85,28 @@
     const CONNECTED_ADDR_KEY = "stellarscope.connectedWallet";
 
     function setConnectedButtonState(address) {
-      const btn = document.getElementById("headerWalletBtn");
-      if (!btn) return;
-      btn.classList.add("connected");
-      btn.title = address;
-      btn.innerHTML = `
-        <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-          <polyline points="22 4 12 14.01 9 11.01"></polyline>
-        </svg>
-        ${address.slice(0, 4)}…${address.slice(-4)}
-      `;
+      const short = `${address.slice(0, 4)}…${address.slice(-4)}`;
+
+      // Header button (gradient pill, gets the .connected style flip).
+      const header = document.getElementById("headerWalletBtn");
+      if (header) {
+        header.classList.add("connected");
+        header.title = address;
+        header.innerHTML = `
+          <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+          </svg>
+          ${short}
+        `;
+      }
+
+      // Welcome-hero button (btn-secondary; just update the label).
+      const hero = document.getElementById("heroWalletBtn");
+      if (hero) {
+        hero.title = `Connected: ${address}`;
+        hero.textContent = `Connected · ${short}`;
+      }
     }
 
     async function connectAndAdd(address, label) {
@@ -2513,7 +2524,7 @@
         <button class="btn" onclick="enterPortfolioMode()" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;">
           My Portfolio
         </button>
-        <button class="btn btn-secondary" onclick="connectWalletViaModal()" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;" title="Connect any supported Stellar wallet">
+        <button class="btn btn-secondary" id="heroWalletBtn" onclick="connectWalletViaModal()" style="padding: 14px 32px; font-size: 16px; border-radius: 16px;" title="Connect any supported Stellar wallet">
           Connect Wallet
         </button>
       </div>
