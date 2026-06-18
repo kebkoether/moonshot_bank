@@ -3174,10 +3174,17 @@
 
     function buildShareUrl() {
       if (!walletList || walletList.length === 0) return null;
+      // Encode the current view (which wallet) and tab so the recipient
+      // lands on the same screen the sharer was looking at. v:2 adds these
+      // fields; v:1 payloads decode without them and default to All / Tokens.
+      const isAll = activeView === "all";
+      const tab = isAll ? currentAggTab : currentTab;
       const payload = {
-        v: 1,
+        v: 2,
         name: "Shared portfolio",
         wallets: walletList.map((w) => ({ a: w.address, l: w.label || null })),
+        view: isAll ? "all" : activeView,
+        tab: tab || "tokens",
       };
       const encoded = base64urlEncode(JSON.stringify(payload));
       const base = `${location.origin}${location.pathname}`;
@@ -3229,7 +3236,32 @@
           .map((w) => ({ address: w.a || w.address, label: w.l || w.label || null }))
           .filter((w) => w.address && /^G[A-Z2-7]{55}$/.test(w.address));
         if (wallets.length === 0) return null;
-        return { name: payload.name || "Shared portfolio", wallets };
+
+        // v2: optional view + tab. Validate against the imported wallet
+        // list and known tab names; bad values silently fall back.
+        const VALID_AGG_TABS = ["tokens", "history", "defi", "transactions", "claimable", "nfts"];
+        const VALID_WALLET_TABS = ["tokens", "portfolio", "defi", "history", "claimable", "nfts"];
+        let view = "all";
+        let tab = "tokens";
+        if (payload.view) {
+          if (payload.view === "all") {
+            view = "all";
+          } else if (typeof payload.view === "string" && /^G[A-Z2-7]{55}$/.test(payload.view)
+                     && wallets.some((w) => w.address === payload.view)) {
+            view = payload.view;
+          }
+        }
+        if (typeof payload.tab === "string") {
+          const allowed = view === "all" ? VALID_AGG_TABS : VALID_WALLET_TABS;
+          if (allowed.includes(payload.tab)) tab = payload.tab;
+        }
+
+        return {
+          name: payload.name || "Shared portfolio",
+          wallets,
+          view,
+          tab,
+        };
       } catch (e) {
         return null;
       }
@@ -3240,7 +3272,14 @@
       if (!imported) return false;
       sharedView = { active: true, name: imported.name, wallets: imported.wallets };
       walletList = imported.wallets.map((w) => ({ address: w.address, label: w.label }));
-      activeView = "all";
+      activeView = imported.view;
+      // Pre-set the appropriate tab variable so renderMultiWalletView /
+      // renderSingleWalletInPanel pick it up on the first render.
+      if (imported.view === "all") {
+        currentAggTab = imported.tab;
+      } else {
+        currentTab = imported.tab;
+      }
       multiWalletMode = true;
       await loadMultiWalletPortfolio();
       return true;
