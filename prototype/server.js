@@ -16,6 +16,7 @@ const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
 const UpshiftAdapter = require("./lib/adapters/upshift");
+const LPPositionsAdapter = require("./lib/adapters/lp-positions");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
@@ -44,6 +45,7 @@ const PROTOCOL_ADAPTERS = [
   SushiSwapV3Adapter,
   SolvProtocolAdapter,
   UpshiftAdapter,
+  LPPositionsAdapter,
 ];
 
 // ── Price Engine ──────────────────────────────────────────────────────────────

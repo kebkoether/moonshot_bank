@@ -4600,10 +4600,16 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       otherPositions.forEach((pos) => {
         const protocolIcon = pos.protocol === "sushiswap-v3" ? "sushi"
           : pos.protocol === "solv-protocol" ? "solv"
-          : pos.protocol === "upshift" ? "upshift" : "default";
-        const protocolLabel = pos.protocol === "sushiswap-v3" ? "SushiSwap V3"
+          : pos.protocol === "upshift" ? "upshift"
+          : pos.protocol === "aquarius" ? "aqua"
+          : pos.protocol === "soroswap" ? "soroswap"
+          : pos.protocol === "templar" ? "templar" : "default";
+        const protocolLabel = pos.protocol === "sushiswap-v3" ? (pos.poolName || "SushiSwap V3")
           : pos.protocol === "solv-protocol" ? "Solv Protocol"
-          : pos.protocol === "upshift" ? (pos.vaultName ? `Upshift · ${pos.vaultName}` : "Upshift") : pos.protocol;
+          : pos.protocol === "upshift" ? (pos.vaultName ? `Upshift · ${pos.vaultName}` : "Upshift")
+          : pos.protocol === "aquarius" ? (pos.poolName || "Aquarius")
+          : pos.protocol === "soroswap" ? (pos.poolName || "Soroswap")
+          : pos.protocol === "templar" ? (pos.vaultName || "Templar Finance") : pos.protocol;
         const typeLabel = pos.type.replace(/_/g, " ");
 
         html += `<div class="defi-card">`;
