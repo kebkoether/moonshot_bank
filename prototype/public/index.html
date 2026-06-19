@@ -3694,6 +3694,16 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
         <div class="stats-grid">
           <div class="stat-card">
+            <div class="stat-label">Tokens</div>
+            <div class="stat-value">${fmtBigUSD(balances.reduce((s,b) => s + (b.totalValueUSD || 0), 0))}</div>
+            <div class="stat-sub">${balances.length} asset${balances.length !== 1 ? "s" : ""}, ${pricedBalances.length} priced</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">DeFi</div>
+            <div class="stat-value">${fmtBigUSD((d.wallets || []).reduce((sum, w) => sum + ((w.defiPositions || []).reduce((s, p) => s + (p.valueUSD || 0), 0)), 0))}</div>
+            <div class="stat-sub">${(d.wallets || []).reduce((sum, w) => sum + (w.defiPositions?.length || 0), 0)} position${((d.wallets || []).reduce((sum, w) => sum + (w.defiPositions?.length || 0), 0)) !== 1 ? "s" : ""}</div>
+          </div>
+          <div class="stat-card">
             <div class="stat-label">Wallets</div>
             <div class="stat-value">${totalWallets}</div>
             <div class="stat-sub">${currentNetwork}</div>
@@ -3704,16 +3714,6 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
             <div class="stat-sub" style="color: ${(d.xlmPrice?.change24h || 0) >= 0 ? "var(--green)" : "var(--red)"}">
               ${(d.xlmPrice?.change24h || 0) >= 0 ? "+" : ""}${fmt(d.xlmPrice?.change24h || 0)}%
             </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Unique Assets</div>
-            <div class="stat-value">${balances.length}</div>
-            <div class="stat-sub">${pricedBalances.length} priced</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-label">Total DeFi</div>
-            <div class="stat-value">${(d.wallets || []).reduce((sum, w) => sum + (w.defiPositions?.length || 0), 0)}</div>
-            <div class="stat-sub">across all wallets</div>
           </div>
         </div>
 
