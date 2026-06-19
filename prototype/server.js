@@ -764,6 +764,31 @@ const RWA_YIELDS_PATH = path.join(__dirname, "lib", "rwa-yields.json");
 const RWA_STATS_TTL = 5 * 60_000; // 5 min; Horizon supply moves slowly
 let rwaStatsCache = { ts: 0, payload: null };
 
+// SOFR is published by the NY Fed once per business day, so caching for
+// 1 hour is plenty. Used to compute YLDS yield (SOFR - 35 bps per Figure).
+const SOFR_TTL = 60 * 60_000;
+let sofrCache = { ts: 0, rate: null, asOf: null };
+
+async function getSofrRate() {
+  if (sofrCache.rate != null && Date.now() - sofrCache.ts < SOFR_TTL) {
+    return { rate: sofrCache.rate, asOf: sofrCache.asOf };
+  }
+  try {
+    const res = await fetch("https://markets.newyorkfed.org/api/rates/secured/sofr/last/1.json");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const rec = (data?.refRates || [])[0];
+    if (!rec || typeof rec.percentRate !== "number") throw new Error("no SOFR record");
+    sofrCache = { ts: Date.now(), rate: rec.percentRate, asOf: rec.effectiveDate };
+    return { rate: rec.percentRate, asOf: rec.effectiveDate };
+  } catch (e) {
+    console.warn("SOFR fetch failed:", e.message);
+    return sofrCache.rate != null
+      ? { rate: sofrCache.rate, asOf: sofrCache.asOf } // stale ok
+      : null;
+  }
+}
+
 function rwaSlugServer(a) {
   const id = (a.issuer || a.contractId || "").toLowerCase().slice(0, 6);
   return `${(a.code || "").toLowerCase()}-${id}`;
@@ -840,6 +865,18 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
               entry.source = entry.source ? `${entry.source} + Horizon` : "Horizon";
               entry.asOf = new Date().toISOString().slice(0, 10);
             }
+          }
+        }
+        // Layer 3: per-asset live yield overrides.
+        // YLDS pays SOFR - 35 bps (per ylds.com); rwa.xyz doesn't track it
+        // because yield accrues via daily distributions, not token price.
+        if (a.code === "YLDS") {
+          const sofr = await getSofrRate();
+          if (sofr) {
+            const yieldPct = sofr.rate - 0.35;
+            entry.yield7d = `${yieldPct.toFixed(2)}%`;
+            entry.asOf = sofr.asOf;
+            entry.source = `NY Fed SOFR ${sofr.rate.toFixed(2)}% − 35 bps`;
           }
         }
         stats[slug] = entry;
