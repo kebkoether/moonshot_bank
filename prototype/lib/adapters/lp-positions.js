@@ -148,28 +148,188 @@ async function _readLPPosition(pool, userAddress, priceCtx) {
   };
 }
 
-async function _detectSushiV3(userAddress, priceCtx) {
+// SushiSwap V3 NFT enumeration cache. Max tokenId is binary-searched once,
+// then we scan a recent window. Cache results per-wallet to avoid the scan
+// on every portfolio refresh.
+const SUSHI_TTL = 5 * 60_000;
+const sushiCache = new Map(); // userAddress -> { ts, positions }
+const MIN_TICK = -887272;
+const MAX_TICK = 887272;
+
+async function _sushiOwnerOf(tokenId) {
   try {
-    const balance = await getTokenBalance(SUSHI_V3_POSITIONS_NFT, userAddress).catch(() => "0");
-    const count = BigInt(balance || "0");
-    if (count === 0n) return null;
-    // We can detect the count of position NFTs but not the per-position
-    // token amounts without enumerating each tokenId + reading its tick
-    // range + reserves. Render a placeholder with the count and a link.
+    const r = await simulateContractCall(SUSHI_V3_POSITIONS_NFT, "owner_of",
+      [StellarSdk.nativeToScVal(tokenId, { type: "u32" })]);
+    if (!r) return null;
+    const v = scValToNative(r);
+    return typeof v === "string" ? v : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function _sushiMaxTokenId() {
+  // Doubling probe + binary search to find max valid tokenId.
+  let lo = 0, hi = 1;
+  while ((await _sushiOwnerOf(hi)) !== null) {
+    lo = hi;
+    hi *= 2;
+    if (hi > 100000) break;
+  }
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if ((await _sushiOwnerOf(mid)) !== null) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+async function _sushiUserTokenIds(userAddress, expectedCount, maxId) {
+  // Scan descending from maxId until we've found all the user's tokens or
+  // walked SCAN_DEPTH ids. Most users mint recently, so descending hits
+  // their positions quickly.
+  const SCAN_DEPTH = 500;
+  const found = [];
+  const lower = Math.max(0, maxId - SCAN_DEPTH);
+  for (let id = maxId; id >= lower; id--) {
+    const o = await _sushiOwnerOf(id);
+    if (o === userAddress) {
+      found.push(id);
+      if (found.length >= expectedCount) break;
+    }
+  }
+  return found;
+}
+
+async function _readSushiPosition(tokenId) {
+  try {
+    const r = await simulateContractCall(SUSHI_V3_POSITIONS_NFT, "positions",
+      [StellarSdk.nativeToScVal(tokenId, { type: "u32" })]);
+    if (!r) return null;
+    const arr = scValToNative(r);
+    // Layout: [nonce, token0, token1, fee, tickLower, tickUpper, liquidity,
+    //          feeGrowthInside0LastX128, feeGrowthInside1LastX128,
+    //          tokensOwed0, tokensOwed1]
+    if (!Array.isArray(arr) || arr.length < 7) return null;
     return {
-      protocol: "sushiswap-v3",
-      type: "concentrated_lp",
-      contractId: SUSHI_V3_POSITIONS_NFT,
-      token0: { symbol: "—" },
-      token1: { symbol: "—" },
-      amounts: { token0: count.toString() + " NFT", token1: "—" },
-      position: { inRange: null },
-      unclaimedFees: { token0: "—", token1: "—" },
-      poolName: `SushiSwap V3 (${count} position${count === 1n ? "" : "s"})`,
-      valueUSD: 0, // unknown without per-position tick math
+      tokenId,
+      token0Address: arr[1],
+      token1Address: arr[2],
+      fee: Number(arr[3]),
+      tickLower: Number(arr[4]),
+      tickUpper: Number(arr[5]),
+      liquidity: BigInt(arr[6] || 0),
+      tokensOwed0: BigInt(arr[9] || 0),
+      tokensOwed1: BigInt(arr[10] || 0),
     };
   } catch (e) {
     return null;
+  }
+}
+
+// Approximate token amounts in a Uniswap V3 position. For full-range
+// positions (tickLower=MIN_TICK, tickUpper=MAX_TICK), liquidity at price=1
+// resolves to ~liquidity-units of each token, which works well for stable
+// pairs like PYUSD/USDC. For concentrated positions we'd need the pool's
+// slot0() current sqrtPriceX96 — punt with a TVL-based approximation.
+function _approxAmounts(pos, token0, token1, sqrtPriceCurrent) {
+  const L = Number(pos.liquidity);
+  const isFullRange = pos.tickLower <= MIN_TICK + 10 && pos.tickUpper >= MAX_TICK - 10;
+  const sqrtPa = Math.pow(1.0001, pos.tickLower / 2);
+  const sqrtPb = Math.pow(1.0001, pos.tickUpper / 2);
+
+  // Default sqrtP=1 (stable-pair assumption). The caller can pass the
+  // pool's actual slot0 if known.
+  const sqrtP = sqrtPriceCurrent || 1;
+
+  let amount0Raw = 0;
+  let amount1Raw = 0;
+  if (sqrtP <= sqrtPa) {
+    amount0Raw = L * (sqrtPb - sqrtPa) / (sqrtPa * sqrtPb);
+  } else if (sqrtP >= sqrtPb) {
+    amount1Raw = L * (sqrtPb - sqrtPa);
+  } else {
+    amount0Raw = L * (sqrtPb - sqrtP) / (sqrtP * sqrtPb);
+    amount1Raw = L * (sqrtP - sqrtPa);
+  }
+
+  // Sushi V3 uses 7-decimal token amounts on Soroban. Divide by 10^7.
+  // The math above gives raw token amounts in the contract's scale.
+  return {
+    amount0: amount0Raw / Math.pow(10, token0.decimals),
+    amount1: amount1Raw / Math.pow(10, token1.decimals),
+    isFullRange,
+  };
+}
+
+async function _detectSushiV3(userAddress, priceCtx) {
+  const cached = sushiCache.get(userAddress);
+  if (cached && Date.now() - cached.ts < SUSHI_TTL) return cached.positions;
+
+  try {
+    const balance = await getTokenBalance(SUSHI_V3_POSITIONS_NFT, userAddress).catch(() => "0");
+    const count = Number(BigInt(balance || "0"));
+    if (count === 0) {
+      sushiCache.set(userAddress, { ts: Date.now(), positions: [] });
+      return [];
+    }
+
+    const maxId = await _sushiMaxTokenId();
+    const userTokenIds = await _sushiUserTokenIds(userAddress, count, maxId);
+
+    const { getTokenMetadata } = require("../soroban-rpc");
+    const positions = [];
+    for (const tokenId of userTokenIds) {
+      const pos = await _readSushiPosition(tokenId);
+      if (!pos) continue;
+
+      const [meta0, meta1] = await Promise.all([
+        getTokenMetadata(pos.token0Address).catch(() => null),
+        getTokenMetadata(pos.token1Address).catch(() => null),
+      ]);
+      const token0 = {
+        contractId: pos.token0Address,
+        code: meta0?.symbol || "?",
+        decimals: meta0?.decimals ?? 7,
+      };
+      const token1 = {
+        contractId: pos.token1Address,
+        code: meta1?.symbol || "?",
+        decimals: meta1?.decimals ?? 7,
+      };
+
+      const amts = _approxAmounts(pos, token0, token1, null);
+      const price0 = _tokenPriceUSD(token0.code, priceCtx);
+      const price1 = _tokenPriceUSD(token1.code, priceCtx);
+      const valueUSD = amts.amount0 * price0 + amts.amount1 * price1;
+
+      positions.push({
+        protocol: "sushiswap-v3",
+        type: "concentrated_lp",
+        contractId: SUSHI_V3_POSITIONS_NFT,
+        tokenId,
+        token0: { symbol: token0.code, contractId: token0.contractId, decimals: token0.decimals },
+        token1: { symbol: token1.code, contractId: token1.contractId, decimals: token1.decimals },
+        amounts: {
+          token0: _fmtAmount(amts.amount0),
+          token1: _fmtAmount(amts.amount1),
+        },
+        feeTier: pos.fee,
+        position: { inRange: amts.isFullRange ? true : null },
+        unclaimedFees: {
+          token0: _fmtAmount(Number(pos.tokensOwed0) / Math.pow(10, token0.decimals)),
+          token1: _fmtAmount(Number(pos.tokensOwed1) / Math.pow(10, token1.decimals)),
+        },
+        poolName: `SushiSwap V3 ${token0.code}/${token1.code}${amts.isFullRange ? " (full range)" : ""}`,
+        valueUSD,
+      });
+    }
+
+    sushiCache.set(userAddress, { ts: Date.now(), positions });
+    return positions;
+  } catch (e) {
+    console.warn("SushiSwap V3 detection failed:", e.message);
+    return [];
   }
 }
 
@@ -293,13 +453,14 @@ const LPPositionsAdapter = {
 
   async getPositions(userAddress, priceCtx) {
     const pools = await _discoverPools(userAddress);
-    const results = await Promise.allSettled([
-      ...pools.map((p) => _readLPPosition(p, userAddress, priceCtx)),
-      _detectSushiV3(userAddress, priceCtx),
+    const [poolResults, sushiPositions] = await Promise.all([
+      Promise.allSettled(pools.map((p) => _readLPPosition(p, userAddress, priceCtx))),
+      _detectSushiV3(userAddress, priceCtx).catch(() => []),
     ]);
-    return results
+    const lpPositions = poolResults
       .filter((r) => r.status === "fulfilled" && r.value !== null)
       .map((r) => r.value);
+    return [...lpPositions, ...(sushiPositions || [])];
   },
 };
 
