@@ -72,10 +72,18 @@ async function _coingeckoPrice(coingeckoId) {
   try {
     const url = `${COINGECKO_API}/simple/price?ids=${encodeURIComponent(coingeckoId)}&vs_currencies=usd&include_24hr_change=true`;
     const res = await fetch(url);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // 429 (rate limit) / 5xx: return stale cache if available rather
+      // than null. Stale price is much better than zeroing out a position.
+      if (hit) return hit;
+      return null;
+    }
     const data = await res.json();
     const entry = data[coingeckoId];
-    if (!entry) return null;
+    if (!entry || !entry.usd) {
+      if (hit) return hit;
+      return null;
+    }
     const out = {
       usd: entry.usd,
       change24h: entry.usd_24h_change || 0,
@@ -84,6 +92,8 @@ async function _coingeckoPrice(coingeckoId) {
     cgPriceCache.set(coingeckoId, out);
     return out;
   } catch (e) {
+    // Network / parse failure — same stale-fallback policy.
+    if (hit) return hit;
     return null;
   }
 }

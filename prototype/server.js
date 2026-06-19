@@ -57,21 +57,57 @@ async function getXLMPrice() {
   const cached = priceCache.get("XLM");
   if (cached && Date.now() - cached.ts < PRICE_TTL) return cached.price;
 
+  // Primary: Freighter's token-prices endpoint (purpose-built for Stellar
+  // assets; doesn't rate-limit our Railway IP). Fallback: CoinGecko.
+  try {
+    const res = await fetch("https://freighter-backend-prd.stellar.org/api/v1/token-prices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tokens: ["XLM"] }),
+    });
+    if (res.ok) {
+      const body = await res.json();
+      const v = body?.data?.XLM;
+      const usd = parseFloat(v?.currentPrice);
+      if (Number.isFinite(usd) && usd > 0) {
+        const change = parseFloat(v?.percentagePriceChange24h);
+        const price = {
+          usd,
+          change24h: Number.isFinite(change) ? change : 0,
+        };
+        priceCache.set("XLM", { price, ts: Date.now() });
+        return price;
+      }
+    }
+  } catch (e) {
+    console.warn("Freighter XLM price failed, falling back to CoinGecko:", e.message);
+  }
+
   try {
     const res = await fetch(
       "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd&include_24hr_change=true"
     );
     const data = await res.json();
-    const price = {
-      usd: data.stellar.usd,
-      change24h: data.stellar.usd_24h_change || 0,
-    };
-    priceCache.set("XLM", { price, ts: Date.now() });
-    return price;
+    if (data?.stellar?.usd && data.stellar.usd > 0) {
+      const price = {
+        usd: data.stellar.usd,
+        change24h: data.stellar.usd_24h_change || 0,
+      };
+      priceCache.set("XLM", { price, ts: Date.now() });
+      return price;
+    }
   } catch (e) {
-    console.error("Failed to fetch XLM price:", e.message);
-    return { usd: 0, change24h: 0 };
+    console.error("Failed to fetch XLM price (CoinGecko fallback also failed):", e.message);
   }
+
+  // Both sources failed. Return the last cached value if we have one,
+  // even if stale — preferable to zero, which cascades into bogus
+  // portfolio totals across every Stellar holding.
+  if (cached) {
+    console.warn("XLM price sources all failed; returning stale cache");
+    return cached.price;
+  }
+  return { usd: 0, change24h: 0 };
 }
 
 async function getAssetPriceViaSDEX(assetCode, assetIssuer) {
