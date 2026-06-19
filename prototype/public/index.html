@@ -4677,6 +4677,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
             </div>
           `;
         } else if (pos.type === "lp") {
+          const apyHtml = pos.apy7d
+            ? `<div class="defi-detail-value" style="color:var(--green)">${pos.apy7d}</div>`
+            : `<div class="defi-detail-value" style="color:var(--text-muted)">—</div>`;
           html += `
             <div class="defi-detail-item">
               <div class="defi-detail-label">${pos.token0.symbol}</div>
@@ -4687,8 +4690,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div class="defi-detail-value">${pos.amounts.token1}</div>
             </div>
             <div class="defi-detail-item">
-              <div class="defi-detail-label">Pool Share</div>
-              <div class="defi-detail-value">${fmt(pos.shareOfPool * 100, 4)}%</div>
+              <div class="defi-detail-label">APY (7d)</div>
+              ${apyHtml}
             </div>
           `;
         }

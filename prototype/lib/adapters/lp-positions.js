@@ -21,6 +21,22 @@
 const { simulateContractCall, getTokenBalance } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
 const { scValToNative } = StellarSdk;
+const fs = require("fs");
+const path = require("path");
+
+// Curated APYs (manually maintained, no live AMM yield feed exists for
+// Soroswap/Aquarius pools yet). null entries render as "—".
+const LP_YIELDS_PATH = path.join(__dirname, "..", "lp-yields.json");
+let lpYieldsCache = null;
+function _loadLpYields() {
+  if (lpYieldsCache) return lpYieldsCache;
+  try {
+    lpYieldsCache = JSON.parse(fs.readFileSync(LP_YIELDS_PATH, "utf8"));
+  } catch (e) {
+    lpYieldsCache = { pools: {} };
+  }
+  return lpYieldsCache;
+}
 
 // Common Soroban token contract IDs we use for token resolution.
 const TOKENS = {
@@ -111,6 +127,9 @@ async function _readLPPosition(pool, userAddress, priceCtx) {
     0
   );
 
+  const yields = _loadLpYields();
+  const y = yields.pools?.[pool.poolContractId] || {};
+
   return {
     protocol: pool.protocol,
     type: "lp",
@@ -122,6 +141,9 @@ async function _readLPPosition(pool, userAddress, priceCtx) {
       token1: _fmtAmount(amounts[1]),
     },
     poolName: pool.name,
+    apy7d: y.apy7d || null,
+    apyAsOf: y.asOf || null,
+    apySource: y.source || null,
     valueUSD,
   };
 }

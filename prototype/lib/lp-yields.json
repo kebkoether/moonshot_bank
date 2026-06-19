@@ -1,0 +1,17 @@
+{
+  "_note": "Manually curated APY values per LP pool, keyed by the pool contract ID. Update yield7d when verified with the pool's analytics page. Sources: Aquarius dashboard (aqua.network/pools), Soroswap analytics (analytics.soroswap.finance or similar), DefiLlama where indexed. null hides the value.",
+  "pools": {
+    "CAM7DY53G63XA4AJRS24Z6VFYAFSSF76C3RZ45BE5YU3FQS5255OOABP": {
+      "name": "Soroswap XLM/USDC",
+      "apy7d": null,
+      "asOf": null,
+      "source": null
+    },
+    "CAFHLHGZXOVNCGFJ7DOXL7JDNMBCEZKDI3LS5NRQH3GXC7CSIMQZHUSM": {
+      "name": "Aquarius USDY/USDC",
+      "apy7d": null,
+      "asOf": null,
+      "source": null
+    }
+  }
+}
