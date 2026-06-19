@@ -218,20 +218,21 @@ app.get("/api/v1/account/:address", async (req, res) => {
           valueUSD: 0, // Will be enriched
         });
       } else {
-        // Standard trustline token
+        // Standard trustline token. Skip empty trustlines (drained tokens
+        // like USDx) so they don't clutter the wallet view.
+        if (amount === 0) continue;
+
         const code = bal.asset_code;
         const issuer = bal.asset_issuer;
         let price = null;
         let valueUSD = 0;
 
-        if (amount > 0) {
-          price = await pricingEngine.priceClassicAsset(
-            { priceViaSDEX: getAssetPriceViaSDEX },
-            code,
-            issuer
-          );
-          if (price) valueUSD = amount * price.usd;
-        }
+        price = await pricingEngine.priceClassicAsset(
+          { priceViaSDEX: getAssetPriceViaSDEX },
+          code,
+          issuer
+        );
+        if (price) valueUSD = amount * price.usd;
 
         totalValueUSD += valueUSD;
 
@@ -1011,19 +1012,20 @@ app.post("/api/v1/portfolio", async (req, res) => {
             existing.wallets.push({ address, balance: amount, valueUSD });
             assetAgg.set(key, existing);
           } else if (bal.asset_type !== "liquidity_pool_shares") {
+            // Skip empty trustlines (drained tokens like USDx).
+            if (amount === 0) continue;
+
             const code = bal.asset_code;
             const issuer = bal.asset_issuer;
             let price = null;
             let valueUSD = 0;
 
-            if (amount > 0) {
-              price = await pricingEngine.priceClassicAsset(
-                { priceViaSDEX: getAssetPriceViaSDEX },
-                code,
-                issuer
-              );
-              if (price) valueUSD = amount * price.usd;
-            }
+            price = await pricingEngine.priceClassicAsset(
+              { priceViaSDEX: getAssetPriceViaSDEX },
+              code,
+              issuer
+            );
+            if (price) valueUSD = amount * price.usd;
 
             walletTotalUSD += valueUSD;
             balances.push({
@@ -1514,19 +1516,20 @@ async function fetchPortfolioForScheduler(address) {
     } else if (bal.asset_type === "liquidity_pool_shares") {
       balances.push({ type: "lp_share", poolId: bal.liquidity_pool_id, shares: bal.balance, valueUSD: 0 });
     } else {
+      // Skip empty trustlines (drained tokens).
+      if (amount === 0) continue;
+
       const code = bal.asset_code;
       const issuer = bal.asset_issuer;
       let price = null;
       let valueUSD = 0;
 
-      if (amount > 0) {
-        price = await pricingEngine.priceClassicAsset(
-          { priceViaSDEX: getAssetPriceViaSDEX },
-          code,
-          issuer
-        );
-        if (price) valueUSD = amount * price.usd;
-      }
+      price = await pricingEngine.priceClassicAsset(
+        { priceViaSDEX: getAssetPriceViaSDEX },
+        code,
+        issuer
+      );
+      if (price) valueUSD = amount * price.usd;
 
       totalValueUSD += valueUSD;
       balances.push({
