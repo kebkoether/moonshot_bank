@@ -173,18 +173,128 @@ async function _detectSushiV3(userAddress, priceCtx) {
   }
 }
 
+// ── Auto-discovery ────────────────────────────────────────────────────────────
+// Walk the user's recent Soroban activity, find any contracts they've invoked
+// that expose AMM pool methods (get_reserves + get_tokens), classify pattern
+// (Soroswap vs Aquarius), and merge with the hardcoded KNOWN_POOLS list.
+// Cached per-wallet for 5 min — Horizon walks are expensive.
+
+const HORIZON_BASE = "https://horizon.stellar.org";
+const DISCOVERY_TTL = 5 * 60_000;
+const discoveryCache = new Map(); // userAddress -> { ts, pools }
+
+async function _userInvokedContracts(userAddress) {
+  // Walk last 200 ops; collect first-Address-param of each Soroban invocation.
+  const contracts = new Set();
+  try {
+    const res = await fetch(`${HORIZON_BASE}/accounts/${userAddress}/operations?order=desc&limit=200`);
+    if (!res.ok) return contracts;
+    const data = await res.json();
+    for (const op of (data?._embedded?.records || [])) {
+      if (op.type !== "invoke_host_function") continue;
+      const addrParam = (op.parameters || []).find((p) => p.type === "Address");
+      if (!addrParam) continue;
+      try {
+        const sv = StellarSdk.xdr.ScVal.fromXDR(addrParam.value, "base64");
+        const c = scValToNative(sv);
+        if (typeof c === "string" && c.startsWith("C")) contracts.add(c);
+      } catch (e) {}
+    }
+  } catch (e) {
+    console.warn("LP discovery: tx walk failed:", e.message);
+  }
+  return contracts;
+}
+
+async function _classifyPool(contractId) {
+  // Probe: get_reserves should return array of i128 reserves; get_tokens
+  // should return array of token contract addresses. If both present, it's
+  // an AMM pool. share_id() returning a separate contract distinguishes
+  // Aquarius-style from Soroswap-style.
+  let reserves = null;
+  let tokens = null;
+  try {
+    const r = await simulateContractCall(contractId, "get_reserves", []);
+    if (r) reserves = scValToNative(r);
+  } catch (e) {}
+  if (!Array.isArray(reserves) || reserves.length < 2) return null;
+
+  try {
+    const r = await simulateContractCall(contractId, "get_tokens", []);
+    if (r) tokens = scValToNative(r);
+  } catch (e) {}
+  if (!Array.isArray(tokens) || tokens.length < 2) return null;
+
+  let pattern = "soroswap";
+  let shareTokenContractId = contractId;
+  try {
+    const r = await simulateContractCall(contractId, "share_id", []);
+    if (r) {
+      const id = scValToNative(r);
+      if (typeof id === "string" && id.startsWith("C")) {
+        pattern = "aquarius";
+        shareTokenContractId = id;
+      }
+    }
+  } catch (e) {}
+
+  // Resolve token metadata for nice display.
+  const { getTokenMetadata } = require("../soroban-rpc");
+  const tokenMeta = await Promise.all(
+    tokens.map((t) =>
+      getTokenMetadata(t)
+        .then((m) => ({
+          contractId: t,
+          code: m?.symbol || "?",
+          decimals: m?.decimals ?? 7,
+        }))
+        .catch(() => ({ contractId: t, code: "?", decimals: 7 }))
+    )
+  );
+
+  return {
+    protocol: pattern,
+    pattern,
+    name: `${pattern === "aquarius" ? "Aquarius" : "Soroswap"} ${tokenMeta.map((t) => t.code).join("/")}`,
+    poolContractId: contractId,
+    shareTokenContractId,
+    tokens: tokenMeta,
+  };
+}
+
+async function _discoverPools(userAddress) {
+  const cached = discoveryCache.get(userAddress);
+  if (cached && Date.now() - cached.ts < DISCOVERY_TTL) return cached.pools;
+
+  const contracts = await _userInvokedContracts(userAddress);
+  // Skip contracts we've already cataloged in KNOWN_POOLS
+  const known = new Set(KNOWN_POOLS.map((p) => p.poolContractId));
+  const candidates = [...contracts].filter((c) => !known.has(c) && c !== SUSHI_V3_POSITIONS_NFT);
+
+  // Probe in parallel — each takes ~3 RPC calls, so cap concurrency.
+  const classifications = await Promise.allSettled(candidates.map((c) => _classifyPool(c)));
+  const discovered = classifications
+    .filter((r) => r.status === "fulfilled" && r.value !== null)
+    .map((r) => r.value);
+
+  const pools = [...KNOWN_POOLS, ...discovered];
+  discoveryCache.set(userAddress, { ts: Date.now(), pools });
+  return pools;
+}
+
 const LPPositionsAdapter = {
   protocolId: "lp-positions",
   name: "LP Positions",
   type: "dex",
 
   isConfigured() {
-    return KNOWN_POOLS.length > 0;
+    return true; // auto-discovery means we're always configured
   },
 
   async getPositions(userAddress, priceCtx) {
+    const pools = await _discoverPools(userAddress);
     const results = await Promise.allSettled([
-      ...KNOWN_POOLS.map((p) => _readLPPosition(p, userAddress, priceCtx)),
+      ...pools.map((p) => _readLPPosition(p, userAddress, priceCtx)),
       _detectSushiV3(userAddress, priceCtx),
     ]);
     return results
