@@ -1,241 +1,101 @@
 /**
- * Templar Finance Adapter for Stellar/Soroban
+ * Templar Finance Adapter for Stellar
  *
- * Templar is a chain-agnostic overcollateralized lending DeFi protocol.
- * It uses isolated "market" contracts, each representing a single
- * COLLATERAL → BORROW asset pair.
+ * Templar's Stellar deployment doesn't use Soroban smart contracts for
+ * custody — instead users send classic Stellar payments to a Templar-
+ * controlled G-address, and the actual lending logic runs on NEAR (via
+ * Chain Signatures / MPC). So position state lives off-Stellar.
  *
- * Architecture (from Templar-Protocol/contracts):
- *   registry — deploys and manages market contracts
- *   market   — single collateral→borrow pair with isolated risk
- *   client/vault — client-side vault interaction helpers
+ * This adapter detects the on-chain side of that flow: scan the user's
+ * payment history for transfers TO known Templar deposit addresses,
+ * subtract any payments back FROM those addresses (withdrawals), and
+ * report the net deposit as a "vault" position.
  *
- * This adapter tracks:
- * 1. Collateral deposits per market
- * 2. Borrow positions per market
- * 3. Health factor / liquidation risk
+ * Limitations to be honest about:
+ *   - Doesn't include accrued yield (that's tracked off-chain on NEAR)
+ *   - Doesn't surface borrow amounts
+ *   - Net-deposit value ≈ initial principal, not current account equity
+ *   - Link to app.templarfi.org for the authoritative numbers
  *
- * Reference: https://github.com/Templar-Protocol/contracts
+ * Adding new custody addresses: append to TEMPLAR_DEPOSIT_ADDRESSES.
  */
-const {
-  simulateContractCall,
-  getTokenMetadata,
-  formatTokenAmount,
-} = require("../soroban-rpc");
-const StellarSdk = require("@stellar/stellar-sdk");
-const { Address, scValToNative } = StellarSdk;
 
-// ── Configuration ─────────────────────────────────────────────────────────────
+// Known Templar custody addresses on Stellar mainnet. Add more as they
+// become known (e.g., a per-market deposit address pattern).
+const TEMPLAR_DEPOSIT_ADDRESSES = new Set([
+  "GDJ4JZXZELZD737NVFORH4PSSQDWFDZTKW3AIDKHYQG23ZXBPDGGQBJK",
+]);
 
-const TEMPLAR_CONFIG = {
-  // Templar registry contract (manages all markets)
-  registryContractId: process.env.TEMPLAR_REGISTRY_CONTRACT_ID || null,
+const HORIZON_BASE = "https://horizon.stellar.org";
 
-  // Known Templar market contracts
-  // Each market is a single collateral→borrow pair
-  markets: JSON.parse(process.env.TEMPLAR_MARKETS || "[]"),
-  // Example:
-  // [
-  //   {
-  //     "contractId": "CABC...",
-  //     "name": "XLM → USDC",
-  //     "collateral": { "symbol": "XLM", "contractId": "C...", "decimals": 7 },
-  //     "borrow": { "symbol": "USDC", "contractId": "C...", "decimals": 7 }
-  //   }
-  // ]
-};
+// Cache payments per user for 60s — the Horizon query is paginated and
+// each page is ~50 records, so a hot wallet with months of history might
+// trigger 5-10 pages per scan.
+const CACHE_TTL = 60_000;
+const cache = new Map(); // userAddress -> { ts, positions }
 
-// ── Contract Queries ─────────────────────────────────────────────────────────
+async function _scanPayments(userAddress) {
+  // Aggregate per asset: { [assetKey]: { code, issuer|null, sent, received } }
+  const perAsset = new Map();
+  let cursor = "";
+  let pages = 0;
+  const MAX_PAGES = 20; // safety cap (~1000 ops)
 
-/**
- * Get user's position in a Templar market.
- * Templar markets typically expose a get_position or get_user_position function
- * returning collateral deposited and amount borrowed.
- */
-async function getMarketPosition(marketContractId, userAddress) {
-  const userScVal = new Address(userAddress).toScVal();
-
-  // Try known function names for position queries
-  const methods = ["get_position", "get_user_position", "position"];
-  let result = null;
-
-  for (const method of methods) {
+  while (pages < MAX_PAGES) {
+    const url = `${HORIZON_BASE}/accounts/${userAddress}/payments?order=desc&limit=200${cursor ? `&cursor=${cursor}` : ""}`;
+    let data;
     try {
-      result = await simulateContractCall(marketContractId, method, [userScVal]);
-      if (result) break;
+      const res = await fetch(url);
+      if (!res.ok) break;
+      data = await res.json();
     } catch (e) {
-      continue;
+      break;
     }
-  }
 
-  if (!result) return null;
+    const records = data?._embedded?.records || [];
+    if (records.length === 0) break;
 
-  const position = scValToNative(result);
-  return position;
-}
+    for (const r of records) {
+      if (r.type !== "payment") continue;
+      const isToTemplar = TEMPLAR_DEPOSIT_ADDRESSES.has(r.to);
+      const isFromTemplar = TEMPLAR_DEPOSIT_ADDRESSES.has(r.from);
+      if (!isToTemplar && !isFromTemplar) continue;
 
-/**
- * Get market configuration (collateral/borrow assets, rates, etc.)
- */
-async function getMarketConfig(marketContractId) {
-  try {
-    // Try common config getter names
-    for (const method of ["get_config", "config", "get_market_info"]) {
-      try {
-        const result = await simulateContractCall(marketContractId, method);
-        if (result) return scValToNative(result);
-      } catch (e) {
-        continue;
+      // Skip if user isn't on either side
+      if (r.from !== userAddress && r.to !== userAddress) continue;
+
+      const code = r.asset_type === "native" ? "XLM" : r.asset_code;
+      const issuer = r.asset_type === "native" ? null : r.asset_issuer;
+      const key = `${code}:${issuer || "native"}`;
+      const amount = parseFloat(r.amount || "0");
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+
+      if (!perAsset.has(key)) {
+        perAsset.set(key, { code, issuer, sent: 0, received: 0 });
       }
-    }
-    return null;
-  } catch (e) {
-    console.error(`[Templar] get_config error:`, e.message);
-    return null;
-  }
-}
-
-/**
- * Get health factor for a user's position (if available).
- */
-async function getHealthFactor(marketContractId, userAddress) {
-  try {
-    const userScVal = new Address(userAddress).toScVal();
-
-    for (const method of ["get_health_factor", "health_factor", "get_health"]) {
-      try {
-        const result = await simulateContractCall(marketContractId, method, [userScVal]);
-        if (result) {
-          const val = scValToNative(result);
-          // Health factor is typically a fixed-point number
-          // > 1.0 means healthy, < 1.0 means at risk of liquidation
-          return typeof val === "object" ? Number(val) / 1e7 : Number(val);
-        }
-      } catch (e) {
-        continue;
+      const agg = perAsset.get(key);
+      if (isToTemplar && r.from === userAddress) {
+        // user → Templar (a deposit)
+        agg.sent += amount;
+      } else if (isFromTemplar && r.to === userAddress) {
+        // Templar → user (a withdrawal)
+        agg.received += amount;
       }
     }
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
 
-// ── Position Resolution ──────────────────────────────────────────────────────
-
-/**
- * Resolve all Templar positions for a user across configured markets.
- */
-async function resolveUserPositions(userAddress) {
-  const positions = [];
-
-  for (const market of TEMPLAR_CONFIG.markets) {
-    try {
-      const rawPosition = await getMarketPosition(market.contractId, userAddress);
-      if (!rawPosition) continue;
-
-      // Parse the position — Templar positions typically contain:
-      // { collateral_amount, borrow_amount } or similar fields
-      const collateralAmount = rawPosition.collateral_amount
-        || rawPosition.collateral
-        || rawPosition.deposited
-        || 0;
-
-      const borrowAmount = rawPosition.borrow_amount
-        || rawPosition.borrowed
-        || rawPosition.debt
-        || 0;
-
-      // Skip if no meaningful position
-      if (BigInt(collateralAmount || 0) === 0n && BigInt(borrowAmount || 0) === 0n) {
-        continue;
-      }
-
-      const collateralInfo = market.collateral || { symbol: "???", decimals: 7 };
-      const borrowInfo = market.borrow || { symbol: "???", decimals: 7 };
-
-      // Get health factor
-      const healthFactor = await getHealthFactor(market.contractId, userAddress);
-
-      // Add collateral position
-      if (BigInt(collateralAmount || 0) > 0n) {
-        positions.push({
-          protocol: "templar",
-          type: "lending",
-          subtype: "collateral",
-          marketContractId: market.contractId,
-          marketName: market.name || `${collateralInfo.symbol} → ${borrowInfo.symbol}`,
-          asset: collateralInfo.symbol,
-          assetContractId: collateralInfo.contractId,
-          decimals: collateralInfo.decimals,
-          underlyingAmount: Number(formatTokenAmount(
-            collateralAmount.toString(),
-            collateralInfo.decimals
-          )),
-          healthFactor,
-          valueUSD: 0, // Enriched by caller
-        });
-      }
-
-      // Add borrow position (debt)
-      if (BigInt(borrowAmount || 0) > 0n) {
-        positions.push({
-          protocol: "templar",
-          type: "borrowing",
-          subtype: "debt",
-          marketContractId: market.contractId,
-          marketName: market.name || `${collateralInfo.symbol} → ${borrowInfo.symbol}`,
-          asset: borrowInfo.symbol,
-          assetContractId: borrowInfo.contractId,
-          decimals: borrowInfo.decimals,
-          underlyingAmount: Number(formatTokenAmount(
-            borrowAmount.toString(),
-            borrowInfo.decimals
-          )),
-          healthFactor,
-          valueUSD: 0, // Negative — this is debt
-        });
-      }
-    } catch (e) {
-      console.error(`[Templar] Error resolving market ${market.contractId}:`, e.message);
-    }
+    cursor = records[records.length - 1].paging_token;
+    pages++;
+    if (records.length < 200) break;
   }
 
-  return positions;
+  return perAsset;
 }
 
-// ── Registry Discovery (optional) ────────────────────────────────────────────
-
-/**
- * Try to discover markets from the registry contract.
- * This is a nice-to-have — falls back to configured markets if registry fails.
- */
-async function discoverMarketsFromRegistry() {
-  if (!TEMPLAR_CONFIG.registryContractId) return [];
-
-  try {
-    for (const method of ["get_markets", "list_markets", "markets"]) {
-      try {
-        const result = await simulateContractCall(
-          TEMPLAR_CONFIG.registryContractId,
-          method
-        );
-        if (result) {
-          const markets = scValToNative(result);
-          return Array.isArray(markets) ? markets : [];
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-  } catch (e) {
-    console.error(`[Templar] Registry discovery error:`, e.message);
-  }
-
-  return [];
+function _priceFor(code, priceCtx) {
+  if (code === "XLM") return priceCtx?.xlmPrice?.usd || 0;
+  if (code === "USDC" || code === "USDx" || code === "PYUSD") return 1; // stable
+  return 0; // unknown — will display valueUSD as 0
 }
-
-// ── Adapter Interface ────────────────────────────────────────────────────────
 
 const TemplarAdapter = {
   protocolId: "templar",
@@ -243,18 +103,52 @@ const TemplarAdapter = {
   type: "lending",
 
   isConfigured() {
-    return (
-      TEMPLAR_CONFIG.markets.length > 0 ||
-      TEMPLAR_CONFIG.registryContractId !== null
-    );
+    return TEMPLAR_DEPOSIT_ADDRESSES.size > 0;
   },
 
-  /**
-   * Get all Templar Finance positions for a user.
-   */
-  async getPositions(userAddress) {
+  async getPositions(userAddress, priceCtx) {
     if (!this.isConfigured()) return [];
-    return resolveUserPositions(userAddress);
+
+    const cached = cache.get(userAddress);
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      return cached.positions;
+    }
+
+    let perAsset;
+    try {
+      perAsset = await _scanPayments(userAddress);
+    } catch (e) {
+      console.warn(`Templar scan failed for ${userAddress}:`, e.message);
+      return [];
+    }
+
+    const positions = [];
+    for (const [, agg] of perAsset) {
+      const net = agg.sent - agg.received;
+      if (net <= 0) continue; // fully withdrawn or no deposit
+      const priceUSD = _priceFor(agg.code, priceCtx);
+      positions.push({
+        protocol: "templar",
+        type: "vault",
+        contractId: null, // Templar doesn't use Soroban for custody
+        vaultName: `Templar ${agg.code} deposit`,
+        receiptSymbol: agg.code,
+        deposited: {
+          amount: net.toFixed(net < 1 ? 6 : 2),
+          asset: agg.code,
+        },
+        yield: {
+          // Yield accrues off-chain on NEAR — we can't read it here.
+          accrued: "0",
+          asset: agg.code,
+          apy: null,
+        },
+        valueUSD: net * priceUSD,
+      });
+    }
+
+    cache.set(userAddress, { ts: Date.now(), positions });
+    return positions;
   },
 };
 
