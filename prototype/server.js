@@ -101,6 +101,62 @@ const PROTOCOL_ADAPTERS = [
   LPPositionsAdapter,
 ];
 
+// Query every configured protocol adapter for a wallet's DeFi positions —
+// IN PARALLEL, each capped at ADAPTER_TIMEOUT_MS so one slow protocol API
+// can't stall the whole response. (Sequential adapter calls were the main
+// reason wallet loads took tens of seconds: 9 adapters × N wallets ×
+// network latency, all serial.)
+const ADAPTER_TIMEOUT_MS = parseInt(process.env.ADAPTER_TIMEOUT_MS || "8000", 10);
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Keep the Soroswap pair universe warm so LP discovery never pays the
+// multi-second factory enumeration on a user's request. Refresh slightly
+// inside the adapter's 1h cache TTL.
+const { warmSoroswapUniverse } = require("./lib/adapters/lp-discovery");
+warmSoroswapUniverse().catch(() => {});
+setInterval(() => warmSoroswapUniverse().catch(() => {}), 50 * 60_000);
+
+async function collectDefiPositions(address, xlmPrice) {
+  const defiPositions = [];
+  const defiByPool = []; // grouped data, currently from Blend
+  let totalUSD = 0;
+
+  const configured = PROTOCOL_ADAPTERS.filter((a) => a.isConfigured());
+  const results = await Promise.allSettled(
+    configured.map((a) =>
+      withTimeout(a.getPositions(address, { xlmPrice }), ADAPTER_TIMEOUT_MS, a.name || "adapter")
+    )
+  );
+
+  results.forEach((r, i) => {
+    if (r.status !== "fulfilled") {
+      console.error(`${configured[i].name || "adapter"} adapter error:`, r.reason?.message);
+      return;
+    }
+    const positions = r.value || [];
+    for (const pos of positions) {
+      totalUSD += pos.valueUSD || 0;
+      defiPositions.push(pos);
+    }
+    // Blend (and any future adapter) may attach grouped pool data via the
+    // __blendPoolGroups property — pass through for the per-pool table.
+    if (Array.isArray(positions.__blendPoolGroups)) {
+      for (const g of positions.__blendPoolGroups) {
+        defiByPool.push({ protocol: "blend", ...g });
+      }
+    }
+  });
+
+  return { defiPositions, defiByPool, totalUSD };
+}
+
 // ── Price Engine ──────────────────────────────────────────────────────────────
 
 const priceCache = new Map();
@@ -375,28 +431,10 @@ app.get("/api/v1/account/:address", async (req, res) => {
     }
 
     // ── DeFi positions (SushiSwap V3, Solv vaults, etc.) ─────────────────
-    const defiPositions = [];
-    const defiByPool = []; // grouped data, currently from Blend; future adapters may add
-    for (const adapter of PROTOCOL_ADAPTERS) {
-      if (!adapter.isConfigured()) continue;
-      try {
-        const positions = await adapter.getPositions(address, { xlmPrice });
-        for (const pos of positions) {
-          totalValueUSD += pos.valueUSD || 0;
-          defiPositions.push(pos);
-        }
-        // Blend (and any future adapter) may attach grouped pool data to
-        // the array via the __blendPoolGroups property. Pass these through
-        // to the frontend so it can render the DeBank-style per-pool table.
-        if (Array.isArray(positions.__blendPoolGroups)) {
-          for (const g of positions.__blendPoolGroups) {
-            defiByPool.push({ protocol: "blend", ...g });
-          }
-        }
-      } catch (e) {
-        console.error(`${adapter.name} adapter error:`, e.message);
-      }
-    }
+    // All protocol adapters queried in parallel with a per-adapter timeout.
+    const { defiPositions, defiByPool, totalUSD: defiTotalUSD } =
+      await collectDefiPositions(address, xlmPrice);
+    totalValueUSD += defiTotalUSD;
 
     // Sort by value descending
     balances.sort((a, b) => (b.valueUSD || 0) - (a.valueUSD || 0));
@@ -1152,7 +1190,10 @@ app.post("/api/v1/portfolio", async (req, res) => {
     // Aggregate balances across wallets by asset key
     const assetAgg = new Map(); // key → { code, issuer, totalBalance, totalValueUSD, price }
 
-    for (const address of walletAddresses) {
+    // Wallets load in parallel — each is independent (Horizon account +
+    // pricing + DeFi adapters). Shared aggregation (assetAgg, grand total)
+    // is safe: mutations happen in synchronous blocks between awaits.
+    await Promise.all(walletAddresses.map(async (address) => {
       try {
         const account = await h.loadAccount(address);
         const balances = [];
@@ -1213,24 +1254,10 @@ app.post("/api/v1/portfolio", async (req, res) => {
           }
         }
 
-        // DeFi positions
-        const defiPositions = [];
-        const defiByPool = [];
-        for (const adapter of PROTOCOL_ADAPTERS) {
-          if (!adapter.isConfigured()) continue;
-          try {
-            const positions = await adapter.getPositions(address, { xlmPrice });
-            for (const pos of positions) {
-              walletTotalUSD += pos.valueUSD || 0;
-              defiPositions.push(pos);
-            }
-            if (Array.isArray(positions.__blendPoolGroups)) {
-              for (const g of positions.__blendPoolGroups) {
-                defiByPool.push({ protocol: "blend", ...g });
-              }
-            }
-          } catch (e) {}
-        }
+        // DeFi positions — all protocol adapters in parallel with timeouts
+        const { defiPositions, defiByPool, totalUSD: defiTotalUSD } =
+          await collectDefiPositions(address, xlmPrice);
+        walletTotalUSD += defiTotalUSD;
 
         grandTotalUSD += walletTotalUSD;
 
@@ -1275,7 +1302,7 @@ app.post("/api/v1/portfolio", async (req, res) => {
           defiByPool: [],
         });
       }
-    }
+    }));
 
     // Sort aggregated balances by value
     const aggregatedBalances = Array.from(assetAgg.values())
