@@ -3213,6 +3213,18 @@
     // is parsed. The later definition overrides at load time.
     function goHome() { /* replaced later */ }
 
+    // ── Render-epoch guard ─────────────────────────────────────
+    // Every top-level view render claims the epoch at entry. Renders are
+    // async (catalog/stats/portfolio fetches can take many seconds on a
+    // cold server); if the user navigates away mid-fetch, the in-flight
+    // render sees a newer epoch after its awaits and aborts instead of
+    // stomping #app with the previous page's content. (Bug: reading an
+    // RWA detail page, a slow portfolio load from an earlier tab visit
+    // would suddenly replace the view while the RWAs tab stayed active.)
+    let renderEpoch = 0;
+    function claimRender() { return ++renderEpoch; }
+    function renderSuperseded(token) { return token !== renderEpoch; }
+
     function lookUpWhale(address) {
       document.getElementById('addressInput').value = address;
       loadPortfolio();
@@ -3238,6 +3250,7 @@
     }
 
     async function switchPage(page) {
+      claimRender(); // invalidate any in-flight render from the previous page
       if (!["portfolio", "rwas", "defi", "profile"].includes(page)) page = "portfolio";
       currentPage = page;
 
@@ -3434,6 +3447,7 @@
 
     window.renderCreateProfilePage = renderCreateProfilePage; // exposed so the module-script Connect handler can trigger a re-render
     async function renderCreateProfilePage() {
+      const render = claimRender();
       const app = document.getElementById("app");
       // Sync cpState.wallet from localStorage on every render — whatever the
       // header shows as connected IS what we use here.
@@ -3462,9 +3476,11 @@
           const r = await fetch(`${API_BASE}/api/v1/profiles/by-wallet/${encodeURIComponent(cpState.wallet.address)}`);
           if (r.ok) {
             const { profiles: mine } = await r.json();
+            if (renderSuperseded(render)) return;
             if (mine && mine.length > 0) return renderProfileManageView(mine[0]);
           }
         } catch (e) { /* fall through to create view */ }
+        if (renderSuperseded(render)) return;
       }
 
       app.innerHTML = `
@@ -3934,13 +3950,16 @@
     }
 
     async function renderDefiPage() {
+      const render = claimRender();
       const app = document.getElementById("app");
       app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">DeFi on Stellar</div><div class="rwa-page-subtitle">Loading protocols…</div></div>`;
       try {
         const res = await fetch(`${API_BASE}/api/v1/defi-explorer`);
         if (!res.ok) throw new Error("HTTP " + res.status);
         defiExplorerData = await res.json();
+        if (renderSuperseded(render)) return;
       } catch (e) {
+        if (renderSuperseded(render)) return;
         app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">DeFi on Stellar</div><div class="error-banner">Failed to load: ${escapeHtml(e.message)}</div></div>`;
         return;
       }
@@ -4052,15 +4071,19 @@
     }
 
     async function renderRwasPage() {
+      const render = claimRender();
       const app = document.getElementById("app");
       app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="rwa-page-subtitle">Loading catalog…</div></div>`;
       try {
         await ensureCatalog();
       } catch (e) {
+        if (renderSuperseded(render)) return;
         app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="error-banner">Failed to load catalog: ${escapeHtml(e.message)}</div></div>`;
         return;
       }
+      if (renderSuperseded(render)) return;
       await ensureRwaStats();
+      if (renderSuperseded(render)) return;
 
       const categories = (rwaCatalog.categories || []);
       const total = categories.reduce((s, c) => s + (c.assets?.length || 0), 0);
@@ -4188,15 +4211,18 @@
     }
 
     async function renderRwaDetailPage(slug) {
+      const render = claimRender();
       const app = document.getElementById("app");
       app.innerHTML = `<div class="rwa-detail"><a href="#/rwas" class="rwa-detail-back">← Back to RWAs</a><div>Loading…</div></div>`;
       try {
         await ensureCatalog();
       } catch (e) {
+        if (renderSuperseded(render)) return;
         app.innerHTML = `<div class="rwa-detail"><a href="#/rwas" class="rwa-detail-back">← Back to RWAs</a><div class="error-banner">Failed to load catalog: ${escapeHtml(e.message)}</div></div>`;
         return;
       }
       await ensureRwaStats();
+      if (renderSuperseded(render)) return;
       const hit = findRwaBySlug(slug);
       if (!hit) {
         app.innerHTML = `<div class="rwa-detail"><a href="#/rwas" class="rwa-detail-back">← Back to RWAs</a><div class="error-banner">Asset not found: ${escapeHtml(slug)}</div></div>`;
@@ -4931,6 +4957,7 @@
     }
 
     async function loadMultiWalletPortfolio() {
+      const render = claimRender();
       multiWalletMode = true;
       const app = document.getElementById("app");
 
@@ -4952,8 +4979,13 @@
         });
         if (!res.ok) throw new Error("Failed to load portfolio");
         portfolioData = await res.json();
+        // The user may have navigated to another page while the portfolio
+        // fetch was in flight — this was THE bug where the RWA detail view
+        // suddenly turned into the portfolio view.
+        if (renderSuperseded(render)) return;
         renderMultiWalletView();
       } catch (e) {
+        if (renderSuperseded(render)) return;
         app.innerHTML = `
           <div class="error-banner">${e.message}</div>
           <div style="text-align:center; padding: 40px;">
@@ -5524,7 +5556,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
     }
 
     async function enterPortfolioMode() {
+      const render = claimRender();
       await loadWalletList();
+      if (renderSuperseded(render)) return;
       if (walletList.length > 0) {
         activeView = "all";
         await loadMultiWalletPortfolio();
@@ -5649,6 +5683,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           return;
         }
 
+        // Claim the epoch only on success — a user who navigated away
+        // mid-fetch keeps their new page.
+        if (currentPage !== "portfolio") return;
+        claimRender();
         timeTravelDate = input.value;
         timeTravelSnapshot = data;
 
@@ -5731,6 +5769,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const address = input.value.trim();
       if (!address) return;
 
+      const render = claimRender();
       const app = document.getElementById("app");
       app.innerHTML = `
         <div class="loading">
@@ -5746,7 +5785,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           const err = await res.json();
           throw new Error(err.error || "Failed to load account");
         }
-        currentData = await res.json();
+        const data = await res.json();
+        if (renderSuperseded(render)) return;
+        currentData = data;
         historyData = null;
         claimableData = null;
         nftsData = null;
@@ -5754,6 +5795,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         currentTab = "tokens";
         renderPortfolio();
       } catch (e) {
+        if (renderSuperseded(render)) return;
         app.innerHTML = `
           <div class="error-banner">${e.message}</div>
           <div class="welcome" style="padding-top: 40px;">
