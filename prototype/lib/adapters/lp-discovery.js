@@ -37,7 +37,10 @@ const AQUA_API = "https://amm-api.aqua.network/api/external/v2";
 const SOROSWAP_FACTORY = "CA4HEQTL2WPEUYKYKCDOHCDNIV4QHNJ7EL4J4NQ6VADP7SYHVRYZ7AW2";
 
 const SOROSWAP_UNIVERSE_TTL = 60 * 60_000; // pool universe changes rarely; refresh hourly
-const CONCURRENCY = 5;                     // Soroban RPC parallel batch size — kept low to avoid 429
+// Soroban RPC parallel batch size. 5 was safe-but-slow: a 214-pair balance
+// sweep took ~8s/wallet and dominated portfolio load time. 10 halves that;
+// tune via env if the RPC provider starts returning 429s.
+const CONCURRENCY = parseInt(process.env.LP_DISCOVERY_CONCURRENCY || "10", 10);
 const USER_POSITIONS_TTL = 5 * 60_000;     // per-user LP-position result cache
 
 // ── Utilities ───────────────────────────────────────────────────────────────
@@ -297,3 +300,7 @@ const LPDiscoveryAdapter = {
 module.exports = LPDiscoveryAdapter;
 module.exports.discoverAquariusPositions = discoverAquariusPositions;
 module.exports.discoverSoroswapPositions = discoverSoroswapPositions;
+// Exposed so the server can hydrate the Soroswap pair universe at boot /
+// on a schedule — enumerating the factory takes many seconds, and doing it
+// lazily made the first wallet load of the hour eat the whole cost.
+module.exports.warmSoroswapUniverse = _refreshSoroswapUniverse;

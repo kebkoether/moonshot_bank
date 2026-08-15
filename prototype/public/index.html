@@ -3213,6 +3213,17 @@
     // is parsed. The later definition overrides at load time.
     function goHome() { /* replaced later */ }
 
+    // ── Feature flags ──────────────────────────────────────────
+    // 'Undeployed' features: code stays in the bundle, UI entry points are
+    // hidden. Flip a flag to true to bring the feature back.
+    const FEATURES = {
+      profileTab: false,   // public profile pages (create/manage)
+      timeTravel: false,   // "View balances at" historical snapshot bar
+    };
+    if (!FEATURES.profileTab) {
+      document.querySelector('.page-nav-tab[data-page="profile"]')?.remove();
+    }
+
     // ── Render-epoch guard ─────────────────────────────────────
     // Every top-level view render claims the epoch at entry. Renders are
     // async (catalog/stats/portfolio fetches can take many seconds on a
@@ -3251,6 +3262,7 @@
 
     async function switchPage(page) {
       claimRender(); // invalidate any in-flight render from the previous page
+      if (page === "profile" && !FEATURES.profileTab) page = "portfolio";
       if (!["portfolio", "rwas", "defi", "profile"].includes(page)) page = "portfolio";
       currentPage = page;
 
@@ -4357,7 +4369,7 @@
       const h = location.hash || "";
       if (h === "#/rwas") return { page: "rwas" };
       if (h === "#/defi") return { page: "defi" };
-      if (h === "#/profile") return { page: "profile" };
+      if (h === "#/profile") return { page: FEATURES.profileTab ? "profile" : "portfolio" };
       const m = h.match(/^#\/rwa\/(.+)$/);
       if (m) return { page: "rwa-detail", slug: m[1] };
       return { page: "portfolio" };
@@ -4723,10 +4735,10 @@
             <button class="share-btn" id="shareCopyBtn">Copy link</button>
             <button class="share-btn" id="shareCloseBtn">Close</button>
           </div>
-          <div class="share-modal-alt">
+          ${FEATURES.profileTab ? `<div class="share-modal-alt">
             <span style="color:var(--text-muted);font-size:12px">Want a persistent URL with your name?</span>
             <a href="#/profile" onclick="event.stopPropagation();document.querySelector('.share-modal-backdrop')?.remove();switchPage('profile');" style="color:var(--accent);font-size:12px;text-decoration:none;font-weight:600">Create a Profile →</a>
-          </div>
+          </div>` : ""}
         </div>
       `;
       backdrop.onclick = () => backdrop.remove();
@@ -5626,6 +5638,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
     // ── Time Travel ──────────────────────────────────────────
     function buildTimeTravelBar() {
+      if (!FEATURES.timeTravel) return "";
       const nowLocal = new Date();
       nowLocal.setMinutes(nowLocal.getMinutes() - nowLocal.getTimezoneOffset());
       const maxDate = nowLocal.toISOString().slice(0, 16);
