@@ -37,17 +37,48 @@ async function getReserveData(asset) {
   return view(K2_ROUTER, "get_reserve_data", [new Address(asset).toScVal()]);
 }
 
+// Read a token's decimals, retrying on transient RPC failures.
+//
+// This MUST NOT fall back to a guess. Reserves here are not uniform — USDC,
+// XLM and PYUSD are 7-decimal but SolvBTC is 8 — so defaulting to 7 silently
+// overstates an 8-decimal position by exactly 10x. That is precisely what
+// happened in production when the public RPC started returning 429s: the
+// decimals call failed, the old code swallowed the error and defaulted, and
+// a $8.05 SolvBTC position rendered as $80.53. A missing position is
+// recoverable; a confidently wrong balance is not.
+async function readDecimals(asset) {
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const d = Number(await view(asset, "decimals"));
+      if (Number.isFinite(d) && d >= 0 && d <= 18) return d;
+      lastErr = new Error(`implausible decimals: ${d}`);
+    } catch (e) {
+      lastErr = e;
+    }
+    await new Promise((r) => setTimeout(r, 250 * 2 ** attempt)); // 250ms, 500ms
+  }
+  throw new Error(`could not read decimals for ${asset}: ${lastErr && lastErr.message}`);
+}
+
+// Returns null when the reserve can't be read reliably; callers skip it.
 async function getReserveMeta(asset, data) {
   if (reserveMetaCache.has(asset)) return reserveMetaCache.get(asset);
-  let symbol = null, decimals = 7;
+  let decimals;
+  try {
+    decimals = await readDecimals(asset);
+  } catch (e) {
+    console.error("[k2] skipping reserve \u2014", e.message);
+    return null;
+  }
+  let symbol = null;
   try { symbol = await view(asset, "symbol"); } catch (_) {}
-  try { decimals = Number(await view(asset, "decimals")); } catch (_) {}
   let cleanSymbol = typeof symbol === "string" ? symbol.replace(/\0+$/, "") : asset.slice(0, 4);
   if (cleanSymbol === "native") cleanSymbol = "XLM"; // SAC XLM reports "native"
   const meta = {
     asset,
     symbol: cleanSymbol,
-    decimals: Number.isFinite(decimals) ? decimals : 7,
+    decimals,
     aToken: data.a_token_address,
     debtToken: data.debt_token_address,
   };
@@ -84,6 +115,7 @@ async function getPositions(userAddress) {
     try { data = await getReserveData(asset); } catch (_) { continue; }
     if (!data) continue;
     const meta = await getReserveMeta(asset, data);
+    if (!meta) continue; // decimals unreadable — omit rather than guess
     const [scaledSupply, scaledDebt] = await Promise.all([
       tokenBalance(meta.aToken, userScVal),
       tokenBalance(meta.debtToken, userScVal),
