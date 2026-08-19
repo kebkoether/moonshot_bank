@@ -10,7 +10,6 @@ const { resolveSorobanTokens, resolveCustomToken, getRegistry } = require("./lib
 const { discoverSorobanTokens } = require("./lib/contract-discovery");
 const { isKnownSAC, classicForSAC, classicMatches } = require("./lib/sac-mapping");
 const pricingEngine = require("./lib/pricing-engine");
-const SushiSwapV3Adapter = require("./lib/adapters/sushiswap-v3");
 const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
@@ -86,16 +85,15 @@ function getHorizon() {
 const horizon = getHorizon();
 
 // Protocol adapter registry — add new adapters here.
-// LPDiscoveryAdapter auto-discovers positions in Aquarius (HTTP API),
-// Soroswap (factory enumeration), and SushiSwap V3 (detect-and-link).
-// LPPositionsAdapter with hardcoded pools stays as a fallback for any
-// pool the discovery adapter misses (e.g. nascent protocols).
+// LPDiscoveryAdapter auto-discovers positions in Aquarius (HTTP API) and
+// Soroswap (factory enumeration). LPPositionsAdapter reads SushiSwap V3
+// positions from the position-manager contract and keeps a hardcoded-pool
+// fallback for anything discovery misses (e.g. nascent protocols).
 const PROTOCOL_ADAPTERS = [
   BlendAdapter,
   K2Adapter,
   AquariusAdapter,
   TemplarAdapter,
-  SushiSwapV3Adapter,
   SolvProtocolAdapter,
   UpshiftAdapter,
   SentoraAdapter,

@@ -12,9 +12,9 @@
  *   2. Aquarius-style — a separate share-token contract identified via
  *      share_id(). balance(user) goes against the share token.
  *
- * SushiSwap V3 (concentrated liquidity) uses an NFT pattern; we just
- * detect ownership and render a placeholder card linking to their UI.
- * Tick-math + NFT-tokenId enumeration is a follow-up.
+ * SushiSwap V3 (concentrated liquidity) uses an NFT pattern; positions are
+ * read via the position manager's batch view (see _detectSushiV3) and valued
+ * at the pool's live price.
  *
  * To add a new pool: append to KNOWN_POOLS with the right pattern.
  */
@@ -138,118 +138,49 @@ async function _readLPPosition(pool, userAddress, priceCtx) {
   };
 }
 
-// SushiSwap V3 NFT enumeration cache. Max tokenId is binary-searched once,
-// then we scan a recent window. Cache results per-wallet to avoid the scan
-// on every portfolio refresh.
+// SushiSwap V3 positions come from the position manager's batch view:
+// get_user_positions_with_fees(owner, skip, take) returns every position
+// (pair, fee tier, tick range, liquidity, accrued-but-uncollected fees) in
+// ONE simulation. Amounts are then valued at the pool's live slot0 price via
+// position_principal(token_id, sqrt_price_x96), so concentrated (non-stable)
+// pairs value correctly on either side of the range.
 const SUSHI_TTL = 5 * 60_000;
 const sushiCache = new Map(); // userAddress -> { ts, positions }
+const SUSHI_V3_FACTORY = "CD3KRKGDRVWPXVB3VXLUMQKMX6XZ6Q2H334IVZD4XXNAMKSRVQL5GLYF";
 const MIN_TICK = -887272;
 const MAX_TICK = 887272;
 
-async function _sushiOwnerOf(tokenId) {
+const sushiPoolCache = new Map(); // "token0|token1|fee" -> pool contract id (immutable mapping)
+
+function _u32(n) {
+  return StellarSdk.nativeToScVal(Number(n), { type: "u32" });
+}
+
+async function _sushiPool(token0, token1, fee) {
+  const key = `${token0}|${token1}|${fee}`;
+  if (sushiPoolCache.has(key)) return sushiPoolCache.get(key);
+  const r = await simulateContractCall(SUSHI_V3_FACTORY, "get_pool", [
+    new StellarSdk.Address(token0).toScVal(),
+    new StellarSdk.Address(token1).toScVal(),
+    _u32(fee),
+  ]);
+  const pool = r ? scValToNative(r) : null;
+  if (typeof pool !== "string" || !pool.startsWith("C")) return null;
+  sushiPoolCache.set(key, pool);
+  return pool;
+}
+
+// Symbol-keyed pricing first (free), pricing engine as fallback so pairs
+// beyond XLM/stables (e.g. SolvBTC pools) still get a USD value.
+async function _sushiTokenPriceUSD(token, priceCtx) {
+  const bySymbol = _tokenPriceUSD(token.code, priceCtx);
+  if (bySymbol > 0) return bySymbol;
   try {
-    const r = await simulateContractCall(SUSHI_V3_POSITIONS_NFT, "owner_of",
-      [StellarSdk.nativeToScVal(tokenId, { type: "u32" })]);
-    if (!r) return null;
-    const v = scValToNative(r);
-    return typeof v === "string" ? v : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-async function _sushiMaxTokenId() {
-  // Doubling probe + binary search to find max valid tokenId.
-  let lo = 0, hi = 1;
-  while ((await _sushiOwnerOf(hi)) !== null) {
-    lo = hi;
-    hi *= 2;
-    if (hi > 100000) break;
-  }
-  while (hi - lo > 1) {
-    const mid = Math.floor((lo + hi) / 2);
-    if ((await _sushiOwnerOf(mid)) !== null) lo = mid;
-    else hi = mid;
-  }
-  return lo;
-}
-
-async function _sushiUserTokenIds(userAddress, expectedCount, maxId) {
-  // Scan descending from maxId until we've found all the user's tokens or
-  // walked SCAN_DEPTH ids. Most users mint recently, so descending hits
-  // their positions quickly.
-  const SCAN_DEPTH = 500;
-  const found = [];
-  const lower = Math.max(0, maxId - SCAN_DEPTH);
-  for (let id = maxId; id >= lower; id--) {
-    const o = await _sushiOwnerOf(id);
-    if (o === userAddress) {
-      found.push(id);
-      if (found.length >= expectedCount) break;
-    }
-  }
-  return found;
-}
-
-async function _readSushiPosition(tokenId) {
-  try {
-    const r = await simulateContractCall(SUSHI_V3_POSITIONS_NFT, "positions",
-      [StellarSdk.nativeToScVal(tokenId, { type: "u32" })]);
-    if (!r) return null;
-    const arr = scValToNative(r);
-    // Layout: [nonce, token0, token1, fee, tickLower, tickUpper, liquidity,
-    //          feeGrowthInside0LastX128, feeGrowthInside1LastX128,
-    //          tokensOwed0, tokensOwed1]
-    if (!Array.isArray(arr) || arr.length < 7) return null;
-    return {
-      tokenId,
-      token0Address: arr[1],
-      token1Address: arr[2],
-      fee: Number(arr[3]),
-      tickLower: Number(arr[4]),
-      tickUpper: Number(arr[5]),
-      liquidity: BigInt(arr[6] || 0),
-      tokensOwed0: BigInt(arr[9] || 0),
-      tokensOwed1: BigInt(arr[10] || 0),
-    };
-  } catch (e) {
-    return null;
-  }
-}
-
-// Approximate token amounts in a Uniswap V3 position. For full-range
-// positions (tickLower=MIN_TICK, tickUpper=MAX_TICK), liquidity at price=1
-// resolves to ~liquidity-units of each token, which works well for stable
-// pairs like PYUSD/USDC. For concentrated positions we'd need the pool's
-// slot0() current sqrtPriceX96 — punt with a TVL-based approximation.
-function _approxAmounts(pos, token0, token1, sqrtPriceCurrent) {
-  const L = Number(pos.liquidity);
-  const isFullRange = pos.tickLower <= MIN_TICK + 10 && pos.tickUpper >= MAX_TICK - 10;
-  const sqrtPa = Math.pow(1.0001, pos.tickLower / 2);
-  const sqrtPb = Math.pow(1.0001, pos.tickUpper / 2);
-
-  // Default sqrtP=1 (stable-pair assumption). The caller can pass the
-  // pool's actual slot0 if known.
-  const sqrtP = sqrtPriceCurrent || 1;
-
-  let amount0Raw = 0;
-  let amount1Raw = 0;
-  if (sqrtP <= sqrtPa) {
-    amount0Raw = L * (sqrtPb - sqrtPa) / (sqrtPa * sqrtPb);
-  } else if (sqrtP >= sqrtPb) {
-    amount1Raw = L * (sqrtPb - sqrtPa);
-  } else {
-    amount0Raw = L * (sqrtPb - sqrtP) / (sqrtP * sqrtPb);
-    amount1Raw = L * (sqrtP - sqrtPa);
-  }
-
-  // Sushi V3 uses 7-decimal token amounts on Soroban. Divide by 10^7.
-  // The math above gives raw token amounts in the contract's scale.
-  return {
-    amount0: amount0Raw / Math.pow(10, token0.decimals),
-    amount1: amount1Raw / Math.pow(10, token1.decimals),
-    isFullRange,
-  };
+    const { priceSorobanToken } = require("../pricing-engine");
+    const p = await priceSorobanToken(token.contractId, { decimals: token.decimals });
+    if (p && Number.isFinite(p.usd)) return p.usd;
+  } catch (e) {}
+  return 0;
 }
 
 async function _detectSushiV3(userAddress, priceCtx) {
@@ -257,60 +188,80 @@ async function _detectSushiV3(userAddress, priceCtx) {
   if (cached && Date.now() - cached.ts < SUSHI_TTL) return cached.positions;
 
   try {
-    const balance = await getTokenBalance(SUSHI_V3_POSITIONS_NFT, userAddress).catch(() => "0");
-    const count = Number(BigInt(balance || "0"));
-    if (count === 0) {
-      sushiCache.set(userAddress, { ts: Date.now(), positions: [] });
-      return [];
-    }
-
-    const maxId = await _sushiMaxTokenId();
-    const userTokenIds = await _sushiUserTokenIds(userAddress, count, maxId);
+    const raw = await simulateContractCall(
+      SUSHI_V3_POSITIONS_NFT,
+      "get_user_positions_with_fees",
+      [new StellarSdk.Address(userAddress).toScVal(), _u32(0), _u32(100)]
+    );
+    const infos = raw ? scValToNative(raw) : [];
 
     const { getTokenMetadata } = require("../soroban-rpc");
     const positions = [];
-    for (const tokenId of userTokenIds) {
-      const pos = await _readSushiPosition(tokenId);
-      if (!pos) continue;
+    for (const info of infos || []) {
+      const liquidity = BigInt(info.liquidity ?? 0);
+      const owed0 = BigInt(info.tokens_owed0 ?? 0);
+      const owed1 = BigInt(info.tokens_owed1 ?? 0);
+      if (liquidity === 0n && owed0 === 0n && owed1 === 0n) continue; // closed-out NFT
 
       const [meta0, meta1] = await Promise.all([
-        getTokenMetadata(pos.token0Address).catch(() => null),
-        getTokenMetadata(pos.token1Address).catch(() => null),
+        getTokenMetadata(info.token0).catch(() => null),
+        getTokenMetadata(info.token1).catch(() => null),
       ]);
-      const token0 = {
-        contractId: pos.token0Address,
-        code: meta0?.symbol || "?",
-        decimals: meta0?.decimals ?? 7,
-      };
-      const token1 = {
-        contractId: pos.token1Address,
-        code: meta1?.symbol || "?",
-        decimals: meta1?.decimals ?? 7,
-      };
+      const token0 = { contractId: info.token0, code: meta0?.symbol || "?", decimals: meta0?.decimals ?? 7 };
+      const token1 = { contractId: info.token1, code: meta1?.symbol || "?", decimals: meta1?.decimals ?? 7 };
 
-      const amts = _approxAmounts(pos, token0, token1, null);
-      const price0 = _tokenPriceUSD(token0.code, priceCtx);
-      const price1 = _tokenPriceUSD(token1.code, priceCtx);
-      const valueUSD = amts.amount0 * price0 + amts.amount1 * price1;
+      // Principal at the live pool price. If the pool read fails we still
+      // list the position (with fees) rather than hide it — but never guess
+      // amounts from a price assumption.
+      let amount0 = 0;
+      let amount1 = 0;
+      let inRange = null;
+      if (liquidity > 0n) {
+        try {
+          const pool = await _sushiPool(info.token0, info.token1, info.fee);
+          if (pool) {
+            const slot0 = scValToNative(await simulateContractCall(pool, "slot0", []));
+            inRange = slot0.tick >= info.tick_lower && slot0.tick < info.tick_upper;
+            const principal = scValToNative(await simulateContractCall(
+              SUSHI_V3_POSITIONS_NFT,
+              "position_principal",
+              [_u32(info.token_id), StellarSdk.nativeToScVal(BigInt(slot0.sqrt_price_x96), { type: "u256" })]
+            ));
+            amount0 = Number(BigInt(principal[0])) / Math.pow(10, token0.decimals);
+            amount1 = Number(BigInt(principal[1])) / Math.pow(10, token1.decimals);
+          }
+        } catch (e) {
+          console.warn(`SushiV3 principal read failed for token #${info.token_id}:`, e.message);
+        }
+      }
 
+      const [price0, price1] = await Promise.all([
+        _sushiTokenPriceUSD(token0, priceCtx),
+        _sushiTokenPriceUSD(token1, priceCtx),
+      ]);
+      const fees0 = Number(owed0) / Math.pow(10, token0.decimals);
+      const fees1 = Number(owed1) / Math.pow(10, token1.decimals);
+      const valueUSD = (amount0 + fees0) * price0 + (amount1 + fees1) * price1;
+
+      const isFullRange = info.tick_lower <= MIN_TICK + 10 && info.tick_upper >= MAX_TICK - 10;
       positions.push({
         protocol: "sushiswap-v3",
         type: "concentrated_lp",
         contractId: SUSHI_V3_POSITIONS_NFT,
-        tokenId,
+        tokenId: Number(info.token_id),
         token0: { symbol: token0.code, contractId: token0.contractId, decimals: token0.decimals },
         token1: { symbol: token1.code, contractId: token1.contractId, decimals: token1.decimals },
         amounts: {
-          token0: _fmtAmount(amts.amount0),
-          token1: _fmtAmount(amts.amount1),
+          token0: _fmtAmount(amount0),
+          token1: _fmtAmount(amount1),
         },
-        feeTier: pos.fee,
-        position: { inRange: amts.isFullRange ? true : null },
+        feeTier: Number(info.fee),
+        position: { inRange, tickLower: info.tick_lower, tickUpper: info.tick_upper },
         unclaimedFees: {
-          token0: _fmtAmount(Number(pos.tokensOwed0) / Math.pow(10, token0.decimals)),
-          token1: _fmtAmount(Number(pos.tokensOwed1) / Math.pow(10, token1.decimals)),
+          token0: _fmtAmount(fees0),
+          token1: _fmtAmount(fees1),
         },
-        poolName: `SushiSwap V3 ${token0.code}/${token1.code}${amts.isFullRange ? " (full range)" : ""}`,
+        poolName: `SushiSwap V3 ${token0.code}/${token1.code}${isFullRange ? " (full range)" : ""}`,
         valueUSD,
       });
     }
