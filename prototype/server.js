@@ -22,6 +22,7 @@ const snapshotScheduler = require("./lib/snapshot-scheduler");
 const rwaYieldFetcher = require("./lib/rwa-yield-fetcher");
 const K2Adapter = require("./lib/adapters/k2");
 const defiExplorer = require("./lib/defi-explorer");
+const fxEfficiency = require("./lib/fx-efficiency");
 const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
 const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
@@ -1023,6 +1024,19 @@ app.get("/api/v1/defi-explorer", (req, res) => {
   res.json(defiExplorer.getSnapshot({ full: req.query.full === "1" }));
 });
 
+// FX efficiency ladders (EURC / CETES / TESOURO): executable Horizon path
+// quotes at $1..$1M, refreshed in the background every 2 min. ?fresh=1
+// forces a live requote (used by the FX tab's Refresh button).
+app.get("/api/v1/fx-efficiency", async (req, res) => {
+  try {
+    if (req.query.fresh === "1") await fxEfficiency.refreshAll();
+    res.set("Cache-Control", "no-store");
+    res.json(fxEfficiency.getSnapshot());
+  } catch (e) {
+    res.status(500).json({ error: "FX efficiency unavailable" });
+  }
+});
+
 // Per-protocol detail: every pool, no TVL threshold (drill-down pages).
 // The frontend's #/defi/{id} route depends on this; without it every
 // protocol detail page 404s.
@@ -1837,6 +1851,9 @@ app.listen(PORT, () => {
 
   // Start DeFi Explorer background refresh (protocol & pool directory)
   defiExplorer.start();
+
+  // Start FX efficiency ladder refresh (EURC/CETES/TESOURO depth tables)
+  fxEfficiency.start();
 
   // Run daily downsampling at startup (and it could be scheduled via cron too)
   setTimeout(() => {

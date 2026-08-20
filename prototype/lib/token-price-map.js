@@ -50,7 +50,7 @@ const SEED = [
   { coingeckoId: "doge-token", symbol: "DOGET", kind: "classic", code: "DOGET", issuer: "GDOEVDDBU6OBWKL7VHDAOKD77UP4DK" },
   { coingeckoId: "ethereumx", symbol: "ETX", kind: "classic", code: "ETX", issuer: "GCEFMSNWXTALXQPRQFIXOMWJHZFDEQ" },
   { coingeckoId: "etherfuse-ktb", symbol: "KTB", kind: "classic", code: "KTB", issuer: "GCRYUGD5NVARGXT56XEZI5CIFCQETY" },
-  { coingeckoId: "euro-coin", symbol: "EURC", kind: "classic", code: "EURC", issuer: "GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZ" },
+  { coingeckoId: "euro-coin", symbol: "EURC", kind: "classic", code: "EURC", issuer: "GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPP2" },
   { coingeckoId: "franklin-templeton-benji", symbol: "BENJI", kind: "classic", code: "BENJI", issuer: "GBHNGLLIE3KWGKCHIKMHJ5HVZHYIK7" },
   { coingeckoId: "fredenergy", symbol: "FRED", kind: "classic", code: "FRED", issuer: "GCA73U2PZFWAXJSNVMEVPNPPJCZGET" },
   { coingeckoId: "glitzkoin", symbol: "GTN", kind: "classic", code: "GTN", issuer: "GARFMAHQM4JDI55SK2FGEPLOZU7BTE" },

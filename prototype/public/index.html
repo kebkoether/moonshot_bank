@@ -3178,6 +3178,7 @@
     <button class="page-nav-tab active" data-page="portfolio" onclick="switchPage('portfolio')">Portfolio</button>
     <button class="page-nav-tab" data-page="defi" onclick="switchPage('defi')">DeFi</button>
     <button class="page-nav-tab" data-page="rwas" onclick="switchPage('rwas')">RWAs</button>
+    <button class="page-nav-tab" data-page="fx" onclick="switchPage('fx')">FX</button>
     <button class="page-nav-tab" data-page="profile" onclick="switchPage('profile')">Profile</button>
   </nav>
 
@@ -3336,7 +3337,7 @@
     async function switchPage(page) {
       claimRender(); // invalidate any in-flight render from the previous page
       if (page === "profile" && !FEATURES.profileTab) page = "portfolio";
-      if (!["portfolio", "rwas", "defi", "profile"].includes(page)) page = "portfolio";
+      if (!["portfolio", "rwas", "defi", "fx", "profile"].includes(page)) page = "portfolio";
       currentPage = page;
 
       // Update tab styles
@@ -3345,7 +3346,7 @@
       });
 
       // Update URL hash without scrolling
-      const newHash = page === "rwas" ? "#/rwas" : page === "defi" ? "#/defi" : page === "profile" ? "#/profile" : "";
+      const newHash = page === "rwas" ? "#/rwas" : page === "defi" ? "#/defi" : page === "fx" ? "#/fx" : page === "profile" ? "#/profile" : "";
       if (location.hash !== newHash) {
         history.replaceState(null, "", location.pathname + location.search + newHash);
       }
@@ -3354,6 +3355,8 @@
         await renderRwasPage();
       } else if (page === "defi") {
         await renderDefiPage();
+      } else if (page === "fx") {
+        await renderFxPage();
       } else if (page === "profile") {
         await renderCreateProfilePage();
       } else {
@@ -4034,6 +4037,134 @@
       return (frac * 100).toFixed(2) + "%";
     }
 
+    // ── FX efficiency page ─────────────────────────────────────
+    // Live depth tables: what does converting $X actually cost right now?
+    // Server refreshes quotes every 2 min; this page re-pulls every 60s
+    // while it stays the active view (epoch guard prevents stale stomps).
+    let fxAutoTimer = null;
+
+    function fmtFxRate(v) {
+      if (v == null || !isFinite(v)) return "—";
+      return v >= 100 ? v.toFixed(2) : v.toFixed(5);
+    }
+    function fmtBps(v, { signed = false } = {}) {
+      if (v == null || !isFinite(v)) return "—";
+      const s = signed && v > 0 ? "+" : "";
+      return `${s}${v.toFixed(1)} bps`;
+    }
+    function fmtFxSize(v) {
+      if (v >= 1_000_000) return "$" + (v / 1_000_000) + "M";
+      if (v >= 1_000) return "$" + (v / 1_000) + "k";
+      return "$" + v;
+    }
+
+    async function renderFxPage(opts = {}) {
+      const render = claimRender();
+      const app = document.getElementById("app");
+      if (!opts.silent) {
+        app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">FX on Stellar</div><div class="rwa-page-subtitle">Quoting live paths…</div></div>`;
+      }
+      let data;
+      try {
+        const url = `${API_BASE}/api/v1/fx-efficiency${opts.fresh ? "?fresh=1" : ""}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        data = await res.json();
+        if (renderSuperseded(render)) return;
+      } catch (e) {
+        if (renderSuperseded(render)) return;
+        if (!opts.silent) {
+          app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">FX on Stellar</div><div class="error-banner">Failed to load: ${escapeHtml(e.message)}</div></div>`;
+        }
+        return;
+      }
+
+      const updated = data.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : "—";
+      let html = `
+        <div class="rwa-page">
+          <div class="rwa-page-title">FX on Stellar</div>
+          <div class="rwa-page-subtitle">
+            Executable conversion costs at real sizes — every rate is a live quote against on-chain liquidity, not an indicative price.
+            Updated ${escapeHtml(updated)}${data.stale ? " · <b>stale</b>" : ""}
+            · <a href="#" onclick="renderFxPage({fresh:true}); return false;" style="color:var(--accent, #6366f1)">Refresh now</a>
+          </div>
+          <div class="defi-howto">
+            <details>
+              <summary>How to read these tables</summary>
+              <div class="defi-howto-body">
+                <p><b>Round-trip cost</b> is the loss from converting $X of USDC into the token and immediately back — it captures the spread and the price impact of your size in one number. Lower is more efficient.</p>
+                <p><b>vs $1 rate</b> shows how much worse your buy price gets as size grows (depth decay). <b>Insufficient depth</b> means on-chain liquidity can't absorb that size at a sane price today.</p>
+                <p>Quotes come from Stellar's path-finding over the order book and classic pools. Soroban AMM liquidity (Aqua, Soroswap, Sushi) is not yet included — where those pools are deep, true efficiency is better than shown.</p>
+              </div>
+            </details>
+          </div>
+      `;
+
+      for (const t of data.tokens || []) {
+        const midBadge = t.midUsd
+          ? ` · ${escapeHtml(t.midLabel)}: ${fmtFxRate(t.midUsd)}`
+          : "";
+        html += `
+          <div class="rwa-category">
+            <div class="rwa-category-header">
+              <div class="rwa-category-name">${escapeHtml(t.symbol)}</div>
+              <div class="rwa-category-count">spot ${fmtFxRate(t.spotBuyRate)} USD/${escapeHtml(t.symbol)}${midBadge}</div>
+            </div>
+            <div class="rwa-category-desc">${escapeHtml(t.name)} · quoted ${t.quotedAt ? escapeHtml(new Date(t.quotedAt).toLocaleTimeString()) : "—"}</div>
+            <div style="overflow-x:auto">
+              <table style="width:100%; border-collapse:collapse; font-size:13px">
+                <thead>
+                  <tr style="color:var(--text-muted); text-align:right">
+                    <th style="text-align:left; padding:6px 8px">Size</th>
+                    <th style="padding:6px 8px">Buy (USD/${escapeHtml(t.symbol)})</th>
+                    <th style="padding:6px 8px">Sell</th>
+                    <th style="padding:6px 8px">Round-trip</th>
+                    <th style="padding:6px 8px">vs $1 rate</th>
+                    ${t.midUsd ? '<th style="padding:6px 8px">vs interbank</th>' : ""}
+                  </tr>
+                </thead>
+                <tbody>
+        `;
+        for (const r of t.rows || []) {
+          const dead = r.noRoute || r.exhausted;
+          if (dead) {
+            html += `
+              <tr style="border-top:1px solid var(--border, #232838); color:var(--text-muted)">
+                <td style="padding:6px 8px">${fmtFxSize(r.sizeUSD)}</td>
+                <td colspan="${t.midUsd ? 5 : 4}" style="padding:6px 8px; text-align:right">${r.noRoute ? "no route" : "insufficient depth"}</td>
+              </tr>`;
+            continue;
+          }
+          const rtColor = r.roundTripBps == null ? "" : r.roundTripBps <= 30 ? "color:var(--positive, #22c55e)" : r.roundTripBps <= 100 ? "color:var(--warning, #f59e0b)" : "color:var(--negative, #ef4444)";
+          html += `
+            <tr style="border-top:1px solid var(--border, #232838); text-align:right">
+              <td style="padding:6px 8px; text-align:left">${fmtFxSize(r.sizeUSD)}</td>
+              <td style="padding:6px 8px">${fmtFxRate(r.buyRate)}</td>
+              <td style="padding:6px 8px">${fmtFxRate(r.sellRate)}</td>
+              <td style="padding:6px 8px; ${rtColor}">${fmtBps(r.roundTripBps)}</td>
+              <td style="padding:6px 8px">${fmtBps(r.slippageBps, { signed: true })}</td>
+              ${t.midUsd ? `<td style="padding:6px 8px">${fmtBps(r.vsMidBps, { signed: true })}</td>` : ""}
+            </tr>`;
+        }
+        html += `
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }
+
+      html += `</div>`;
+      app.innerHTML = html;
+
+      // Keep the page live: silent refetch every 60s while FX stays active.
+      if (fxAutoTimer) clearInterval(fxAutoTimer);
+      fxAutoTimer = setInterval(() => {
+        if (currentPage !== "fx") { clearInterval(fxAutoTimer); fxAutoTimer = null; return; }
+        renderFxPage({ silent: true });
+      }, 60_000);
+    }
+
     async function renderDefiPage() {
       const render = claimRender();
       const app = document.getElementById("app");
@@ -4609,6 +4740,7 @@
       const h = location.hash || "";
       if (h === "#/rwas") return { page: "rwas" };
       if (h === "#/defi") return { page: "defi" };
+      if (h === "#/fx") return { page: "fx" };
       if (h === "#/profile") return { page: FEATURES.profileTab ? "profile" : "portfolio" };
       const m = h.match(/^#\/rwa\/(.+)$/);
       if (m) return { page: "rwa-detail", slug: m[1] };
