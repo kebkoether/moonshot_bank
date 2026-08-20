@@ -4057,6 +4057,13 @@
       if (v >= 1_000) return "$" + (v / 1_000) + "k";
       return "$" + v;
     }
+    function fmtAgo(iso) {
+      if (!iso) return "—";
+      const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+      if (s < 90) return `${s}s ago`;
+      if (s < 5400) return `${Math.round(s / 60)}m ago`;
+      return `${(s / 3600).toFixed(1)}h ago`;
+    }
 
     async function renderFxPage(opts = {}) {
       const render = claimRender();
@@ -4079,48 +4086,62 @@
         return;
       }
 
-      const updated = data.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : "—";
+      // One shared column template so every placard lines up exactly.
+      const FX_COLS = `
+        <colgroup>
+          <col style="width:12%"><col style="width:20%"><col style="width:20%">
+          <col style="width:18%"><col style="width:14%"><col style="width:16%">
+        </colgroup>`;
+
       let html = `
         <div class="rwa-page">
           <div class="rwa-page-title">FX on Stellar</div>
           <div class="rwa-page-subtitle">
             Executable conversion costs at real sizes — every rate is a live quote against on-chain liquidity, not an indicative price.
-            Updated ${escapeHtml(updated)}${data.stale ? " · <b>stale</b>" : ""}
+            Updated ${escapeHtml(fmtAgo(data.updatedAt))}${data.stale ? " · <b>stale</b>" : ""}
             · <a href="#" onclick="renderFxPage({fresh:true}); return false;" style="color:var(--accent, #6366f1)">Refresh now</a>
           </div>
           <div class="defi-howto">
             <details>
               <summary>How to read these tables</summary>
               <div class="defi-howto-body">
-                <p><b>Round-trip cost</b> is the loss from converting $X of USDC into the token and immediately back — it captures the spread and the price impact of your size in one number. Lower is more efficient.</p>
+                <p><b>Round-trip cost</b> = convert $X of USDC into the token, then immediately convert back, and measure what you lost — like crossing the bid/ask spread twice, including the price impact of your size. It's the all-in "toll" of the market at that size; lower is more efficient. (A one-way conversion costs roughly half.)</p>
                 <p><b>vs $1 rate</b> shows how much worse your buy price gets as size grows (depth decay). <b>Insufficient depth</b> means on-chain liquidity can't absorb that size at a sane price today.</p>
-                <p>Quotes come from Stellar's path-finding over the order book and classic pools. Soroban AMM liquidity (Aqua, Soroswap, Sushi) is not yet included — where those pools are deep, true efficiency is better than shown.</p>
+                <p><b>Where this liquidity sits:</b> quotes are Stellar DEX order books + classic AMM pools, found by Horizon path-finding. The <b>Route</b> column shows the hops — "direct" is the token's own USDC book; "via XLM" crosses the XLM books. Soroban AMM liquidity (Aqua, Soroswap, Sushi) is not yet included — where those pools are deep, true efficiency is better than shown.</p>
               </div>
             </details>
           </div>
       `;
 
+      const USDC_ISSUER = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN";
       for (const t of data.tokens || []) {
-        const midBadge = t.midUsd
-          ? ` · ${escapeHtml(t.midLabel)}: ${fmtFxRate(t.midUsd)}`
-          : "";
+        const expertUrl = `https://stellar.expert/explorer/public/asset/${encodeURIComponent(t.code)}-${encodeURIComponent(t.issuer)}`;
+        const marketUrl = `https://www.stellarx.com/markets/${encodeURIComponent(t.code)}-${encodeURIComponent(t.issuer)}/USDC-${USDC_ISSUER}`;
         html += `
           <div class="rwa-category">
             <div class="rwa-category-header">
-              <div class="rwa-category-name">${escapeHtml(t.symbol)}</div>
-              <div class="rwa-category-count">spot ${fmtFxRate(t.spotBuyRate)} USD/${escapeHtml(t.symbol)}${midBadge}</div>
+              <div class="rwa-category-name">
+                <a href="${expertUrl}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline dotted" title="Asset & issuer on stellar.expert">${escapeHtml(t.symbol)}</a>
+              </div>
+              <div class="rwa-category-count">spot ${fmtFxRate(t.spotBuyRate)} USD/${escapeHtml(t.symbol)} · quoted ${escapeHtml(fmtAgo(t.quotedAt))}</div>
             </div>
-            <div class="rwa-category-desc">${escapeHtml(t.name)} · quoted ${t.quotedAt ? escapeHtml(new Date(t.quotedAt).toLocaleTimeString()) : "—"}</div>
+            <div class="rwa-category-desc">
+              ${escapeHtml(t.name)} ·
+              liquidity: Stellar DEX order books + classic pools ·
+              <a href="${marketUrl}" target="_blank" rel="noopener" style="color:var(--accent, #6366f1)">order book ↗</a> ·
+              <a href="${expertUrl}" target="_blank" rel="noopener" style="color:var(--accent, #6366f1)">issuer ↗</a>
+            </div>
             <div style="overflow-x:auto">
-              <table style="width:100%; border-collapse:collapse; font-size:13px">
+              <table style="width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed">
+                ${FX_COLS}
                 <thead>
                   <tr style="color:var(--text-muted); text-align:right">
                     <th style="text-align:left; padding:6px 8px">Size</th>
                     <th style="padding:6px 8px">Buy (USD/${escapeHtml(t.symbol)})</th>
-                    <th style="padding:6px 8px">Sell</th>
-                    <th style="padding:6px 8px">Round-trip</th>
-                    <th style="padding:6px 8px">vs $1 rate</th>
-                    ${t.midUsd ? '<th style="padding:6px 8px">vs interbank</th>' : ""}
+                    <th style="padding:6px 8px">Sell (USD/${escapeHtml(t.symbol)})</th>
+                    <th style="padding:6px 8px" title="Cost of converting in and immediately back — spread + your size's price impact">Round-trip cost</th>
+                    <th style="padding:6px 8px" title="How much worse the buy rate is vs a $1-sized conversion">vs $1 rate</th>
+                    <th style="padding:6px 8px" title="Which books the best path crosses">Route</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -4131,7 +4152,7 @@
             html += `
               <tr style="border-top:1px solid var(--border, #232838); color:var(--text-muted)">
                 <td style="padding:6px 8px">${fmtFxSize(r.sizeUSD)}</td>
-                <td colspan="${t.midUsd ? 5 : 4}" style="padding:6px 8px; text-align:right">${r.noRoute ? "no route" : "insufficient depth"}</td>
+                <td colspan="5" style="padding:6px 8px; text-align:right">${r.noRoute ? "no route" : "insufficient depth"}</td>
               </tr>`;
             continue;
           }
@@ -4143,7 +4164,7 @@
               <td style="padding:6px 8px">${fmtFxRate(r.sellRate)}</td>
               <td style="padding:6px 8px; ${rtColor}">${fmtBps(r.roundTripBps)}</td>
               <td style="padding:6px 8px">${fmtBps(r.slippageBps, { signed: true })}</td>
-              ${t.midUsd ? `<td style="padding:6px 8px">${fmtBps(r.vsMidBps, { signed: true })}</td>` : ""}
+              <td style="padding:6px 8px; color:var(--text-muted)">${escapeHtml(r.route || "—")}</td>
             </tr>`;
         }
         html += `
