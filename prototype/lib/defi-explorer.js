@@ -44,6 +44,8 @@ const REFRESH_INTERVAL = 60_000;            // main loop tick
 const STALE_GRACE = 24 * 60 * 60_000;       // serve stale values up to 24h on failure
 
 const XLM_SAC = "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA";
+const USDC_SAC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
+const PYUSD_SAC = "CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2";
 
 // ── Protocol metadata (hand-written blurbs; pool notes are auto-generated) ──
 
@@ -105,11 +107,11 @@ const PROTOCOL_META = {
     id: "sentora",
     name: "Sentora",
     category: "Yield Vaults",
-    url: "https://defi.stellar.org",
+    url: "https://stellardefihub.com/vaults",
     blurb:
       "Institutional DeFi infrastructure (part of the Stellar DeFi Hub initiative). " +
-      "Its XLM vault takes native XLM deposits under a principal-escrow design; " +
-      "yield is distributed off-chain, so no live APY is published on-chain.",
+      "Three vaults take XLM, USDC or PYUSD deposits under a principal-escrow design, " +
+      "each paying a reward rate published by Sentora and claimable at term end.",
   },
   templar: {
     id: "templar",
@@ -550,34 +552,57 @@ async function fetchUpshift() {
 
 // ── Sentora ─────────────────────────────────────────────────────────────────
 
-const SENTORA_VAULT = "CA54LVHMAY7HGLMVPN4W72XJB4OGKVZBZX26FWN6JD4P3HJFWQUQEHJO";
+// Sentora runs three vaults on the Stellar DeFi Hub, all the same contract
+// type (identical WASM ca6b85a1…, same deployer). Reward rates are the ones
+// Sentora publishes on stellardefihub.com/vaults — they are set by the
+// curator off-chain, so they are quoted, not derived.
+const SENTORA_VAULTS = [
+  { asset: "XLM",   token: XLM_SAC,   vault: "CA54LVHMAY7HGLMVPN4W72XJB4OGKVZBZX26FWN6JD4P3HJFWQUQEHJO", rewardRate: 0.05, endsOn: "2026-11-09" },
+  { asset: "USDC",  token: USDC_SAC,  vault: "CAHEWHOPPDBQYFMAOLDOXXGUX2BCR7EXP4CWYCRY3NEAJB35YPZMMJFF", rewardRate: 0.08, endsOn: "2026-11-19" },
+  { asset: "PYUSD", token: PYUSD_SAC, vault: "CAQRAXBU6G4AAX4BZ7R4WLB62TSVAQFS5ZXJDVXRLAU2NZ2ZTGU5QOYB", rewardRate: 0.08, endsOn: "2026-11-19" },
+];
+const SENTORA_URL = "https://stellardefihub.com/vaults";
 
 async function fetchSentora() {
-  const balRaw = await getTokenBalance(XLM_SAC, SENTORA_VAULT);
-  const xlm = Number(balRaw || 0n) / 1e7;
-  const xlmPrice = (await _priceToken(XLM_SAC)) || 0;
-  const tvl = xlm * xlmPrice;
   const pools = [];
-  if (tvl >= MIN_POOL_TVL_USD) {
+  let totalTvl = 0;
+  for (const v of SENTORA_VAULTS) {
+    let tvl = 0;
+    try {
+      const balRaw = await getTokenBalance(v.token, v.vault);
+      const meta = await getTokenMetadata(v.token).catch(() => null);
+      const dec = meta?.decimals ?? 7;
+      const amt = Number(balRaw || 0n) / 10 ** dec;
+      const price = (await _priceToken(v.token)) || 0;
+      tvl = amt * price;
+    } catch (e) {
+      continue; // a vault we cannot read is omitted rather than shown as zero
+    }
+    totalTvl += tvl;
     pools.push({
-      assets: ["XLM"],
-      name: "Sentora XLM Vault",
+      assets: [v.asset],
+      name: `Sentora ${v.asset} Vault`,
       tvlUSD: tvl,
-      apy: null, // yield distributed off-chain; no on-chain APY
+      // Sentora's published reward rate, not an on-chain derivation.
+      apy: v.rewardRate,
+      apySource: "quoted",
       rewardApy: 0,
-      address: SENTORA_VAULT,
-      url: "https://defi.stellar.org",
-      note: "Deposit native XLM under a principal-escrow design. Yield accrues " +
-        "off-chain, so no live APY is published here.",
+      address: v.vault,
+      url: SENTORA_URL,
+      note: `Deposit ${v.asset} for a ${(v.rewardRate * 100).toFixed(2)}% reward rate ` +
+        `published by Sentora, paid in ${v.asset} and claimable at term end ` +
+        `(${v.endsOn}). Early withdrawal forfeits accrued rewards.`,
     });
   }
+  pools.sort((a, b) => (b.tvlUSD || 0) - (a.tvlUSD || 0));
   return {
     ...PROTOCOL_META.sentora,
-    totalTvlUSD: tvl,
+    totalTvlUSD: totalTvl,
     poolsShown: pools.length,
-    poolsTotal: 1,
-    hasApyData: false,
-    apyNote: "Yield is distributed off-chain; the vault contract tracks principal only.",
+    poolsTotal: SENTORA_VAULTS.length,
+    hasApyData: true,
+    apyNote: "Reward rates are published by Sentora (the curator) and quoted here as-is; they are not derived on-chain.",
+    metricLabel: "Total TVL",
     pools,
   };
 }
@@ -957,6 +982,39 @@ function start() {
 
 // ── Public read API (request path — cache only, never fetches) ──────────────
 
+
+// ── Deep links to each pool on its own protocol's site ──────────────────
+// VERIFIED patterns (read from each app's client-side router):
+//   Blend    pathname "/dashboard", query { poolId }   -> /dashboard?poolId=<C…>
+//   Aquarius route table amm.pool = ":poolAddress"     -> /pools/<C…>
+// Everything else intentionally links to the protocol's pool/vault list:
+// those apps are client-rendered and a wrong path returns HTTP 200 with an
+// empty page, so a guessed deep link would fail silently. Better a correct
+// list page than a broken direct link.
+function poolDeepLink(protocolId, pool) {
+  const addr = pool && (pool.address || pool.poolContractId);
+  switch (protocolId) {
+    case "blend":
+      return addr ? `https://mainnet.blend.capital/dashboard?poolId=${addr}` : "https://mainnet.blend.capital";
+    case "aquarius":
+      return addr ? `https://aqua.network/pools/${addr}` : "https://aqua.network/pools";
+    case "sentora":
+      return "https://stellardefihub.com/vaults";
+    case "templar":
+      return "https://app.templarfi.org/markets";
+    case "upshift":
+      return "https://app.upshift.finance";
+    case "k2":
+      return "https://app.k2lend.com/#markets";
+    case "sushiswap":
+      return "https://www.sushi.com/stellar/explore/pools";
+    case "soroswap":
+      return "https://soroswap.finance";
+    default:
+      return null;
+  }
+}
+
 function getSnapshot(opts = {}) {
   const includeAll = Boolean(opts.full);
   const protocols = [];
@@ -972,9 +1030,12 @@ function getSnapshot(opts = {}) {
       // exemption let permissionless dust/spam Blend pools into the default
       // view — and into the index page's "Top APY" cell.)
       const visible = exempt ? sorted : sorted.filter((p) => (p.tvlUSD || 0) >= MIN_POOL_TVL_USD);
+      // Attach a link to each pool on the protocol's own site. Pool-level
+      // `url` set by a fetcher wins; otherwise derive it.
+      const withLinks = (list) => list.map((p) => ({ ...p, url: p.url || poolDeepLink(f.id, p) }));
       protocols.push({
         ...v,
-        pools: includeAll ? sorted : visible,
+        pools: includeAll ? withLinks(sorted) : withLinks(visible),
         poolsShown: visible.length,
         poolsTotal: v.poolsTotal ?? sorted.length,
         lastUpdated: entry.ts ? new Date(entry.ts).toISOString() : null,
