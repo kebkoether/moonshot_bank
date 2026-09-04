@@ -3293,9 +3293,16 @@
     const FEATURES = {
       profileTab: false,   // public profile pages (create/manage)
       timeTravel: false,   // "View balances at" historical snapshot bar
+      // FX ladders: hidden until posted liquidity looks presentable.
+      // Unlike profileTab, the #/fx deep link STAYS live — no visible
+      // entry point, but the page opens directly for anyone with the URL.
+      fxTab: false,
     };
     if (!FEATURES.profileTab) {
       document.querySelector('.page-nav-tab[data-page="profile"]')?.remove();
+    }
+    if (!FEATURES.fxTab) {
+      document.querySelector('.page-nav-tab[data-page="fx"]')?.remove();
     }
 
     // ── Render-epoch guard ─────────────────────────────────────
