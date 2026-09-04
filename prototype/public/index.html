@@ -2549,6 +2549,12 @@
     }
     .defi-apy-range { font-size: 13px; font-weight: 600; color: var(--green); }
 
+    /* Pool rows that link out to the protocol's own site */
+    a.defi-pool-link { text-decoration: none; color: inherit; }
+    a.defi-pool-link:hover { background: var(--bg-secondary); }
+    a.defi-pool-link:hover .defi-pool-name { color: var(--purple, #7c6cff); }
+    .defi-pool-ext { font-size: 11px; color: var(--text-muted); }
+
     /* Protocol index rows (list page) — RWA-asset-row pattern. */
     .defi-index-list { }
     .defi-index-row {
@@ -4202,7 +4208,11 @@
       }
 
       const d = defiExplorerData;
-      const protocols = d.protocols || [];
+      // RWA Yield (Etherfuse) is hidden for now: that card re-presents pools
+      // already listed under Aquarius/Blend, so it double-counts by design.
+      // Backend still computes it; unhide by dropping this filter.
+      const HIDDEN_DEFI_CATEGORIES = new Set(["RWA Yield"]);
+      const protocols = (d.protocols || []).filter((p) => !HIDDEN_DEFI_CATEGORIES.has(p.category));
       const loaded = protocols.filter((p) => !p.loading && p.totalTvlUSD != null);
       const grandTvl = loaded.reduce((s, p) => s + (p.totalTvlUSD || 0), 0);
       const thresholdLabel = fmtTvl(d.thresholdUSD);
@@ -4350,15 +4360,21 @@
           apyCell = `<div class="defi-pool-cell has-tip" data-label="APY" ${apyTip}>${pool.apy != null ? fmtApy(pool.apy) : fmtApy(null)} ${rewardHtml}</div>`;
         }
         const tvlTip = defiTipAttr({ title: pool.name + " — TVL", rows: defiPoolTvlTipRows(pool), note: "" });
+        // Whole row links out to the pool on the protocol's own site.
+        const href = pool.url || p.url || "";
+        const rowTag = href ? "a" : "div";
+        const rowAttrs = href
+          ? ` href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(pool.name)} on ${escapeHtml(p.name)}"`
+          : "";
         html += `
-          <div class="defi-pool-row" data-defi-search="${escapeHtml((pool.name + " " + (pool.assets || []).join(" ")).toLowerCase())}">
+          <${rowTag} class="defi-pool-row${href ? " defi-pool-link" : ""}"${rowAttrs} data-defi-search="${escapeHtml((pool.name + " " + (pool.assets || []).join(" ")).toLowerCase())}">
             <div class="defi-pool-main">
-              <div class="defi-pool-name">${escapeHtml(pool.name)}</div>
+              <div class="defi-pool-name">${escapeHtml(pool.name)}${href ? ` <span class="defi-pool-ext">↗</span>` : ""}</div>
               <div class="defi-pool-note">${escapeHtml(pool.note || "")}</div>
             </div>
             <div class="defi-pool-cell has-tip" data-label="TVL" ${tvlTip}>${fmtTvl(pool.tvlUSD)}</div>
             ${apyCell}
-          </div>
+          </${rowTag}>
         `;
         if (pool.reserves && pool.reserves.length) {
           html += `<div class="defi-reserve-table"><div class="defi-reserve-head"><span>Asset</span><span>Supplied</span><span>Borrowed</span><span title="What depositors earn">Supply APY</span><span title="What borrowers pay">Borrow APY</span></div>`;
