@@ -65,37 +65,101 @@ async function _dedup(key, fn) {
 
 const cgPriceCache = new Map(); // coingeckoId → { usd, change24h, ts }
 
-async function _coingeckoPrice(coingeckoId) {
-  if (!coingeckoId) return null;
+// Micro-batched fetcher. CoinGecko's free tier rate-limits per REQUEST,
+// not per id — a portfolio render used to fire one /simple/price call per
+// asset, and the burst tripped 429s on every cold cache. Assets then fell
+// through to the SDEX/venue fallbacks (or went unpriced) for a cycle,
+// which is exactly the "wrong total on first load, corrects a minute
+// later" symptom. Lookups arriving within the same tick-window now share
+// ONE request for all their ids.
+let cgBatchQueue = new Map(); // coingeckoId → [resolve, ...]
+let cgBatchTimer = null;
+const CG_BATCH_WINDOW_MS = 25;
+
+function _coingeckoPrice(coingeckoId) {
+  if (!coingeckoId) return Promise.resolve(null);
   const hit = cgPriceCache.get(coingeckoId);
-  if (hit && Date.now() - hit.ts < PRICE_TTL_MS) return hit;
+  if (hit && Date.now() - hit.ts < PRICE_TTL_MS) return Promise.resolve(hit);
+  return new Promise((resolve) => {
+    const waiters = cgBatchQueue.get(coingeckoId);
+    if (waiters) waiters.push(resolve);
+    else cgBatchQueue.set(coingeckoId, [resolve]);
+    if (!cgBatchTimer) {
+      cgBatchTimer = setTimeout(_flushCoingeckoBatch, CG_BATCH_WINDOW_MS);
+      cgBatchTimer.unref?.();
+    }
+  });
+}
+
+async function _flushCoingeckoBatch() {
+  const queue = cgBatchQueue;
+  cgBatchQueue = new Map();
+  cgBatchTimer = null;
+
+  let data = {};
   try {
-    const url = `${COINGECKO_API}/simple/price?ids=${encodeURIComponent(coingeckoId)}&vs_currencies=usd&include_24hr_change=true`;
+    const ids = [...queue.keys()].join(",");
+    const url = `${COINGECKO_API}/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true`;
     const res = await fetch(url);
-    if (!res.ok) {
-      // 429 (rate limit) / 5xx: return stale cache if available rather
-      // than null. Stale price is much better than zeroing out a position.
-      if (hit) return hit;
-      return null;
-    }
-    const data = await res.json();
-    const entry = data[coingeckoId];
-    if (!entry || !entry.usd) {
-      if (hit) return hit;
-      return null;
-    }
-    const out = {
-      usd: entry.usd,
-      change24h: entry.usd_24h_change || 0,
-      ts: Date.now(),
-    };
-    cgPriceCache.set(coingeckoId, out);
-    return out;
+    if (res.ok) data = await res.json();
+    // Non-ok (429/5xx) leaves data empty → per-id stale fallback below.
   } catch (e) {
     // Network / parse failure — same stale-fallback policy.
-    if (hit) return hit;
-    return null;
   }
+
+  for (const [id, resolvers] of queue) {
+    const entry = data[id];
+    let out;
+    if (entry && entry.usd) {
+      out = { usd: entry.usd, change24h: entry.usd_24h_change || 0, ts: Date.now() };
+      cgPriceCache.set(id, out);
+    } else {
+      // Stale price is much better than zeroing out a position.
+      out = cgPriceCache.get(id) || null;
+    }
+    for (const resolve of resolvers) resolve(out);
+  }
+}
+
+// ── Cache priming ────────────────────────────────────────────────────────────
+
+let lastPrimeTs = 0;
+let primeInFlight = null;
+
+/**
+ * Warm the CoinGecko cache for EVERY id the token map knows, in one
+ * batched request. Portfolio routes price assets sequentially, so without
+ * this a cold cache meant one CG call per asset — a burst the free tier
+ * answers with 429s, sending assets down the SDEX/venue fallbacks (or
+ * unpriced) for a cycle and producing wrong first-load totals. Throttled
+ * to once per TTL window; failures are silent (per-asset lookups still
+ * run their own fallback chain).
+ */
+async function primeKnownPrices() {
+  if (Date.now() - lastPrimeTs < PRICE_TTL_MS) return;
+  if (primeInFlight) return primeInFlight;
+  primeInFlight = (async () => {
+    lastPrimeTs = Date.now();
+    try {
+      const ids = priceMap.allCoingeckoIds();
+      if (ids.length === 0) return;
+      const url = `${COINGECKO_API}/simple/price?ids=${encodeURIComponent(ids.join(","))}&vs_currencies=usd&include_24hr_change=true`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      const now = Date.now();
+      for (const [id, entry] of Object.entries(data)) {
+        if (entry && entry.usd) {
+          cgPriceCache.set(id, { usd: entry.usd, change24h: entry.usd_24h_change || 0, ts: now });
+        }
+      }
+    } catch (e) {
+      // Cold-start network hiccup — fallback chain covers it.
+    } finally {
+      primeInFlight = null;
+    }
+  })();
+  return primeInFlight;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -238,6 +302,7 @@ module.exports = {
   priceClassicAsset,
   priceSorobanToken,
   enrichSorobanTokenWithPrice,
+  primeKnownPrices,
   seedSorobanPrice,
   STABLECOINS,
   stats,

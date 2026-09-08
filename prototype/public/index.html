@@ -5581,6 +5581,7 @@
         });
         if (!res.ok) throw new Error("Failed to load portfolio");
         portfolioData = await res.json();
+        portfolioFetchedAt = Date.now();
         // The server no longer returns wallet labels: tracked_wallets is global
         // and was writable by anyone for any address, so its labels leaked
         // between visitors and were rendered raw. Our labels are browser-local,
@@ -5601,6 +5602,49 @@
         `;
       }
     }
+
+    // ── Portfolio auto-refresh ──────────────────────────────────────────
+    // The total on screen should never be minutes old: prices and DeFi
+    // values move, and the first paint after a cold server start can carry
+    // fallback prices that the next pricing cycle corrects. Silently
+    // refetch while the portfolio view is visible — no spinner, the last
+    // good view stays up if a refresh fails.
+    const PORTFOLIO_REFRESH_MS = 60_000;
+    let portfolioFetchedAt = 0;
+
+    async function refreshPortfolioSilently() {
+      if (!multiWalletMode || currentPage !== "portfolio") return;
+      if (document.visibilityState !== "visible") return;
+      if (!walletList || walletList.length === 0) return;
+      const render = claimRender();
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/portfolio`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ addresses: walletList.map((w) => w.address) }),
+        });
+        if (!res.ok) return;
+        const fresh = await res.json();
+        if (renderSuperseded(render)) return;
+        portfolioData = fresh;
+        portfolioFetchedAt = Date.now();
+        applyLocalWalletLabels(portfolioData);
+        renderMultiWalletView();
+      } catch (_) {
+        // Keep the last good view.
+      }
+    }
+    setInterval(refreshPortfolioSilently, PORTFOLIO_REFRESH_MS);
+    document.addEventListener("visibilitychange", () => {
+      // Coming back to a stale tab: refresh immediately instead of waiting
+      // out the remainder of the interval.
+      if (
+        document.visibilityState === "visible" &&
+        Date.now() - portfolioFetchedAt > PORTFOLIO_REFRESH_MS
+      ) {
+        refreshPortfolioSilently();
+      }
+    });
 
     function renderMultiWalletView() {
       const app = document.getElementById("app");
@@ -5623,7 +5667,18 @@
         </div>
       ` : "";
 
-      let walletPanelHTML = sharedBannerHTML + `
+      // DeFi adapters that failed with no cached fallback: their positions
+      // are MISSING from these totals. Say so — a silently smaller number
+      // reads as lost funds (this was the "balance jumps between $290 and
+      // $71" bug: Blend positions dropping out with no signal).
+      const degradedProtocols = [...new Set((d.wallets || []).flatMap((w) => w.defiDegraded || []))];
+      const degradedBannerHTML = degradedProtocols.length ? `
+        <div class="error-banner" style="margin-bottom:12px">
+          ${escapeHtml(degradedProtocols.join(", "))} ${degradedProtocols.length === 1 ? "isn't" : "aren't"} responding right now — positions there are temporarily missing from these totals and will reappear on the next auto-refresh.
+        </div>
+      ` : "";
+
+      let walletPanelHTML = sharedBannerHTML + degradedBannerHTML + `
         <div class="wallet-panel">
           <div class="wallet-panel-header">
             <div class="wallet-panel-title">${sharedView.active ? "Shared Wallets" : "My Wallets"}</div>

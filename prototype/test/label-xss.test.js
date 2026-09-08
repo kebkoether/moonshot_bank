@@ -19,6 +19,9 @@ __setTestDeps({
   }),
   getXLMPrice: async () => ({ usd: 0.12, change24h: 0, source: "test", confidence: "high" }),
   collectDefiPositions: async () => ({ defiPositions: [], defiByPool: [], totalUSD: 0, degraded: [] }),
+  resolveSorobanTokens: async () => [],
+  discoverSorobanTokens: async () => [],
+  primeKnownPrices: async () => {},
 });
 
 const PAYLOAD = '<img src=x onerror="document.title=\'XSS\'">';

@@ -81,6 +81,25 @@ async function getTokenBalance(contractId, userAddress) {
 }
 
 /**
+ * Like getTokenBalance, but only CONTRACT-level failures (e.g. a SAC's
+ * "trustline entry is missing" revert) map to "0" — transport failures
+ * (RPC 429s, network errors) THROW, so callers can tell "no balance" from
+ * "could not ask". getTokenBalance's swallow-everything behavior fed false
+ * zeros into the discovery cache, making real holdings blink out of
+ * portfolio totals whenever the RPC rate-limited.
+ */
+async function getTokenBalanceStrict(contractId, userAddress) {
+  const addressScVal = new Address(userAddress).toScVal();
+  try {
+    const result = await simulateContractCall(contractId, "balance", [addressScVal]);
+    return result ? scValToNative(result).toString() : "0";
+  } catch (e) {
+    if (/Error\(Contract/.test(e.message || "")) return "0";
+    throw e;
+  }
+}
+
+/**
  * Get token metadata (name, symbol, decimals)
  */
 async function getTokenMetadata(contractId) {
@@ -191,6 +210,7 @@ module.exports = {
   simulateContractCall,
   getContractData,
   getTokenBalance,
+  getTokenBalanceStrict,
   getTokenMetadata,
   formatTokenAmount,
   getPoolReserves,
