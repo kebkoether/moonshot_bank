@@ -129,6 +129,9 @@ const _deps = {
   getHorizon: (...a) => getHorizon(...a),
   getXLMPrice: (...a) => getXLMPrice(...a),
   collectDefiPositions: (...a) => collectDefiPositions(...a),
+  resolveSorobanTokens: (...a) => resolveSorobanTokens(...a),
+  discoverSorobanTokens: (...a) => discoverSorobanTokens(...a),
+  primeKnownPrices: (...a) => pricingEngine.primeKnownPrices(...a),
 };
 function __setTestDeps(overrides) {
   if (process.env.NODE_ENV !== "test") return;
@@ -341,7 +344,10 @@ async function getAssetPriceViaSDEX(assetCode, assetIssuer) {
     } else if (orderbook.bids.length > 0) {
       priceInXLM = parseFloat(orderbook.bids[0].price);
     } else {
-      priceInXLM = parseFloat(orderbook.asks[0].price);
+      // Asks only: nobody is bidding. A lone seller's wishful ask is not a
+      // market price, and valuing a holding off it can inflate a wallet by
+      // orders of magnitude. Leave unpriced — later layers may still price.
+      return null;
     }
 
     const xlmPrice = await getXLMPrice();
@@ -391,17 +397,32 @@ function dedupSACsAgainstClassicBalances(discoveredTokens, classicBalances) {
   if (!Array.isArray(discoveredTokens) || discoveredTokens.length === 0) {
     return discoveredTokens || [];
   }
+  // Every classic asset deterministically owns exactly ONE Stellar Asset
+  // Contract, and the SAC's balance() of a G-account just reads the same
+  // trustline — a "discovered" balance there is the identical holding seen
+  // through the Soroban interface, never a second position. Derive the SAC
+  // id for each non-zero classic balance and drop those contracts.
+  // (The previous hardcoded SAC_TO_CLASSIC map missed PYUSD entirely, and
+  // its type comparison — "token" vs "credit_alphanum4" — never matched,
+  // so USDC/USDT0/PYUSD were all double-counted in wallet totals.)
+  const sacIds = new Set();
+  for (const b of classicBalances || []) {
+    if (parseFloat(b.balance || "0") <= 0) continue;
+    try {
+      if (b.type === "native") {
+        sacIds.add(StellarSdk.Asset.native().contractId(StellarSdk.Networks.PUBLIC));
+      } else if (b.type === "token" && b.asset && b.asset.code && b.asset.issuer) {
+        sacIds.add(
+          new StellarSdk.Asset(b.asset.code, b.asset.issuer).contractId(StellarSdk.Networks.PUBLIC)
+        );
+      }
+    } catch (_) {
+      // Malformed code/issuer — nothing to dedupe against.
+    }
+  }
   return discoveredTokens.filter((tok) => {
     const cid = tok && tok.asset && tok.asset.contractId;
-    if (!cid || !isKnownSAC(cid)) return true;
-    const underlying = classicForSAC(cid);
-    const matchedClassic = (classicBalances || []).find((b) => classicMatches(b, underlying));
-    // Drop the SAC entry only if the classic balance exists AND is non-zero
-    // (a wallet holding the SAC-only is preserved).
-    if (matchedClassic && parseFloat(matchedClassic.balance) > 0) {
-      return false;
-    }
-    return true;
+    return !cid || !sacIds.has(cid);
   });
 }
 
@@ -419,6 +440,11 @@ app.get("/api/v1/account/:address", async (req, res) => {
 
     const account = await h.loadAccount(address);
     const xlmPrice = await getXLMPrice();
+    // One batched CG call for the whole known-token universe — the
+    // per-asset pricing below is sequential, and unprimed cold caches
+    // meant a burst of single-id calls that rate-limited into fallback
+    // prices (the "wrong total on first load" bug).
+    await pricingEngine.primeKnownPrices();
 
     // Process balances
     const balances = [];
@@ -1303,6 +1329,9 @@ app.post("/api/v1/portfolio", sameOriginOnly, async (req, res) => {
 
     const h = _deps.getHorizon();
     const xlmPrice = await _deps.getXLMPrice();
+    // Warm the CG cache in one batched call before per-asset pricing (see
+    // the same call in GET /account).
+    await _deps.primeKnownPrices();
 
     // Seed XLM SAC price so Blend adapter avoids redundant CoinGecko call
     pricingEngine.seedSorobanPrice("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", {
@@ -1376,6 +1405,42 @@ app.post("/api/v1/portfolio", sameOriginOnly, async (req, res) => {
             existing.wallets.push({ address, balance: amount, valueUSD });
             assetAgg.set(key, existing);
           }
+        }
+
+        // Soroban-held tokens (SolvBTC, deRWA funds, …). This path valued
+        // CLASSIC balances only, so a wallet's Soroban holdings silently
+        // vanished from the connect-time total while the single-address
+        // lookup included them — the two views never agreed.
+        try {
+          const registered = await _deps.resolveSorobanTokens(address);
+          const discovered = dedupSACsAgainstClassicBalances(
+            await _deps.discoverSorobanTokens(address),
+            balances
+          );
+          const seenContracts = new Set();
+          for (const st of [...registered, ...discovered]) {
+            const cid = st.asset && st.asset.contractId;
+            if (cid) {
+              if (seenContracts.has(cid)) continue; // registry/discovery overlap
+              seenContracts.add(cid);
+            }
+            walletTotalUSD += st.valueUSD || 0;
+            balances.push(st);
+
+            const key = `${st.asset.code}:${cid || "soroban"}`;
+            const amount = parseFloat(st.balance) || 0;
+            const existing = assetAgg.get(key) || {
+              code: st.asset.code, issuer: cid || null,
+              totalBalance: 0, totalValueUSD: 0, price: st.price || null, wallets: [],
+            };
+            existing.totalBalance += amount;
+            existing.totalValueUSD += st.valueUSD || 0;
+            if (st.price) existing.price = st.price;
+            existing.wallets.push({ address, balance: amount, valueUSD: st.valueUSD || 0 });
+            assetAgg.set(key, existing);
+          }
+        } catch (e) {
+          console.error(`Soroban token inclusion failed for ${address}:`, e.message);
         }
 
         // DeFi positions — all protocol adapters in parallel with timeouts

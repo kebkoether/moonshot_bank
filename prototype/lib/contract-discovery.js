@@ -28,7 +28,7 @@
  */
 
 const {
-  getTokenBalance,
+  getTokenBalanceStrict,
   getTokenMetadata,
   formatTokenAmount,
 } = require("./soroban-rpc");
@@ -130,15 +130,28 @@ async function _probeContract(walletAddress, contractId) {
   // Cache miss or stale — probe on-chain
   let rawBalanceStr;
   try {
-    rawBalanceStr = await getTokenBalance(contractId, walletAddress);
+    rawBalanceStr = await getTokenBalanceStrict(contractId, walletAddress);
   } catch (e) {
-    // Probe failure — record nothing, return null. Don't poison the cache
-    // with a false zero on a transient RPC error.
+    // Probe failure. Don't poison the cache with a false zero — and if we
+    // KNEW a non-zero balance before, serve that stale value rather than
+    // dropping the token: a transient RPC 429 was making real holdings
+    // (deJTRSY, deJAAA) blink in and out of portfolio totals run to run.
+    if (cached && cached.balance_raw && cached.balance_raw !== "0") {
+      return {
+        contractId,
+        rawBalance: BigInt(cached.balance_raw),
+        decimals: cached.decimals,
+        symbol: cached.symbol,
+        isCacheHit: true,
+        stale: true,
+      };
+    }
     return null;
   }
 
-  // getTokenBalance returns "0" both for actual zero and for failed simulation.
-  // For our purposes that's fine — both mean "no priceable balance found right now".
+  // Strict variant: "0" here really means zero (contract-level reverts like
+  // a missing trustline included); transport failures threw above and were
+  // handled by the stale-cache fallback — they never reach the cache write.
   const rawBalance = BigInt(rawBalanceStr || "0");
 
   // Update cache (always — including zero results, to short-circuit future probes)

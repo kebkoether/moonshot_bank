@@ -125,16 +125,20 @@ async function _refreshFactoryPools() {
 // Contract call wrappers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// These wrappers THROW on RPC/simulation failure — null is reserved for
+// "the call succeeded and there was nothing there". Swallowing errors into
+// null made the two cases indistinguishable, so a rate-limited RPC (429
+// bursts on cold caches) read as "user has no Blend positions" and a real
+// ~$200 deposit silently vanished from portfolio totals.
 async function getReserveList(poolContractId) {
-  try { const r = await simulateContractCall(poolContractId, "get_reserve_list"); return r ? scValToNative(r) : null; }
-  catch (e) { return null; }
+  const r = await simulateContractCall(poolContractId, "get_reserve_list");
+  return r ? scValToNative(r) : null;
 }
 
 async function getReserve(poolContractId, assetAddress) {
-  try {
-    const assetScVal = new Address(assetAddress).toScVal();
-    const r = await simulateContractCall(poolContractId, "get_reserve", [assetScVal]); return r ? scValToNative(r) : null;
-  } catch (e) { return null; }
+  const assetScVal = new Address(assetAddress).toScVal();
+  const r = await simulateContractCall(poolContractId, "get_reserve", [assetScVal]);
+  return r ? scValToNative(r) : null;
 }
 
 async function getPoolConfig(poolContractId) {
@@ -143,10 +147,9 @@ async function getPoolConfig(poolContractId) {
 }
 
 async function getUserPositions(poolContractId, userAddress) {
-  try {
-    const userScVal = new Address(userAddress).toScVal();
-    const r = await simulateContractCall(poolContractId, "get_positions", [userScVal]); return r ? scValToNative(r) : null;
-  } catch (e) { return null; }
+  const userScVal = new Address(userAddress).toScVal();
+  const r = await simulateContractCall(poolContractId, "get_positions", [userScVal]);
+  return r ? scValToNative(r) : null;
 }
 
 /**
@@ -411,6 +414,8 @@ async function _resolveUserPositionsInPool(pool, userAddress) {
 
     if (BigInt(collat) === 0n && BigInt(supply) === 0n && BigInt(liab) === 0n) continue;
 
+    // The user HAS a position on this reserve — a failed reserve read here
+    // must fail the pool (throw), not skip the row and undercount.
     const reserveData = await getReserve(pool.contractId, assetAddress);
     if (!reserveData) continue;
 
@@ -491,13 +496,25 @@ async function getPositions(userAddress) {
   if (pools.length === 0) return [];
 
   const groups = [];
+  let failedPools = 0;
   for (const pool of pools) {
     try {
       const group = await _resolveUserPositionsInPool(pool, userAddress);
       if (group) groups.push(group);
     } catch (e) {
+      failedPools++;
       console.error(`[Blend] Failed to resolve pool ${pool.contractId}: ${e.message}`);
     }
+  }
+
+  // A pool that errored may hold REAL positions. Returning the survivors
+  // as a clean success meant the caller cached the shrunken result as
+  // fresh and the portfolio total silently dropped by the missing pools'
+  // value. Throw instead: collectDefiPositions then serves its stale
+  // cached positions, or marks the protocol degraded so the UI can say
+  // "temporarily unavailable" rather than show a smaller number.
+  if (failedPools > 0) {
+    throw new Error(`Blend: ${failedPools}/${pools.length} pools failed to resolve`);
   }
 
   const flat = [];

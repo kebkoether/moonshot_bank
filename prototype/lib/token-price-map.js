@@ -134,6 +134,14 @@ function lookupSoroban(contractId) {
  * @param {string} issuer Full G... issuer address
  * @returns {string|null}
  */
+/**
+ * Every CoinGecko id the map knows about (soroban + classic, deduped) —
+ * lets the pricing engine warm its whole cache in one batched request.
+ */
+function allCoingeckoIds() {
+  return [...new Set([...sorobanMap.values(), ...classicMap.values()])];
+}
+
 function lookupClassic(code, issuer) {
   // Try exact code:issuer-prefix
   if (issuer) {
@@ -232,6 +240,7 @@ function knownSorobanContracts() {
 module.exports = {
   lookupSoroban,
   lookupClassic,
+  allCoingeckoIds,
   refreshFromCoinGecko,
   _maybeRefresh,
   knownSorobanContracts,
