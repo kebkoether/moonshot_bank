@@ -58,6 +58,23 @@ const KNOWN_POOLS = [
 
 const POOL_DISCOVERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
+// Blend pool status (docs.blend.capital → Lending Pool → Pool Management):
+//   0 Admin_Active / 1 Active   — functioning normally
+//   2 Admin_On_Ice / 3 On_Ice   — borrowing + auction cancellations disabled
+//   4 Admin_Frozen / 5 Frozen   — borrowing AND depositing disabled
+//   6 Setup                     — initial state, borrowing + depositing disabled
+// Corroborated by the request rules: deposits fail when status > 3, borrows
+// fail when status > 1. So "usable for both supply and borrow" is status <= 1.
+//
+// Status is NOT static: a pool flips to On Ice automatically when >=25% of
+// backstop deposits are queued for withdrawal, and to Frozen at >=50%. That is
+// why this is read live on every refresh rather than kept as a hardcoded list.
+const BLEND_POOL_STATUS_ACTIVE_MAX = 1;
+const BLEND_POOL_STATUS_LABELS = {
+  0: "Active", 1: "Active", 2: "On Ice", 3: "On Ice",
+  4: "Frozen", 5: "Frozen", 6: "Setup",
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Module state
 // ─────────────────────────────────────────────────────────────────────────────
@@ -546,6 +563,17 @@ async function getPoolsOverview() {
         getPoolConfig(pool.contractId),
       ]);
       if (!Array.isArray(reserveList) || reserveList.length === 0) continue;
+
+      // Skip pools that are not fully usable (On Ice / Frozen / Setup). These
+      // cannot be deposited into or borrowed from, so listing them on the DeFi
+      // tab implies availability that does not exist.
+      const poolStatus = Number(
+        poolConfig?.status ?? poolConfig?.pool_status ?? poolConfig?.poolStatus ?? 0
+      );
+      if (Number.isFinite(poolStatus) && poolStatus > BLEND_POOL_STATUS_ACTIVE_MAX) {
+        continue;
+      }
+
       const backstopTakeRate = fromScalar7(
         poolConfig?.bstop_rate ?? poolConfig?.backstopRate ?? poolConfig?.bstopRate ?? 0
       );
