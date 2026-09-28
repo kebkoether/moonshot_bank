@@ -106,10 +106,10 @@
       "source": "rwa.xyz (yield) + on-chain supply"
     },
     "usdm1-gdm5qw": {
-      "yield7d": "1.65%",
-      "marketCap": "$1.05M",
-      "asOf": "2026-06-18",
-      "source": "rwa.xyz (yield) + Stellar Expert (supply)"
+      "yield7d": "2.01%",
+      "marketCap": "$1.13M",
+      "asOf": "2026-09-28",
+      "source": "Issuer formula: 1-mo UST (H.15 CMT 4.01% on 2026-09-24) minus 200 bps spread; supply 1.11M USDM1 on Stellar (Stellar Expert) x $1.02 NAV (rwa.xyz)"
     },
     "xaum-cc2rbg": {
       "yield7d": null,
