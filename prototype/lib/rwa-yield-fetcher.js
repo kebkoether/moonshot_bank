@@ -481,6 +481,93 @@ async function fetchSorobanSupplies() {
   return out;
 }
 
+// ── USDM1 (Republic of the Marshall Islands sovereign bond) ─────────────────
+// No issuer API. The bond's published terms: interest rate = 1-month U.S.
+// Treasury rate (Fed H.15) minus a 200 bps spread. Yield accrues via NAV
+// growth (rwa.xyz showed NAV $1.02 in Sep 2026) and rwa.xyz publishes no APY
+// for it, so we compute the rate from the benchmark directly.
+//
+// Primary source is the Fed's own H.15 data-download CSV (1-month constant
+// maturity, series RIFLGFCM01_N.B); fallback is FRED DGS1MO, which is the
+// same series. Both are sent a non-default User-Agent: FRED tarpits Node's
+// default UA indefinitely rather than returning an error.
+//
+// Market cap is NOT set here. USDM1 is a classic asset, so server.js Layer 2
+// (Horizon supply × price) handles it.
+
+const USDM1_SLUG = "usdm1-gdm5qw";
+const USDM1_SPREAD_BPS = 200;
+const RATE_FETCH_HEADERS = { "User-Agent": "stellar-scope-rwa-fetcher/1.0" };
+const H15_1MO_CSV_URL =
+  "https://www.federalreserve.gov/datadownload/Output.aspx?rel=H15&series=bf17364827e38702b42a58cf8eaa3f78&lastobs=10&from=&to=&filetype=csv&label=include&layout=seriescolumn";
+const FRED_DGS1MO_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS1MO";
+
+/**
+ * Parse a CSV whose data rows look like "YYYY-MM-DD,<value>,..." and return
+ * the most recent row whose first value column is numeric. Skips header /
+ * metadata rows and no-data markers ("ND" on H.15, "." on FRED), which occur
+ * on holidays. Returns { date, rate } or null.
+ */
+function parseLatestRateCsv(csv) {
+  const rows = String(csv || "").split(/\r?\n/);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const cols = rows[i].split(",");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cols[0])) continue;
+    const rate = parseFloat(cols[1]);
+    if (Number.isFinite(rate)) return { date: cols[0], rate };
+  }
+  return null;
+}
+
+async function fetchTreasury1MoRate() {
+  const sources = [
+    { name: "Fed H.15", url: H15_1MO_CSV_URL },
+    { name: "FRED DGS1MO", url: FRED_DGS1MO_CSV_URL },
+  ];
+  let lastErr = null;
+  for (const src of sources) {
+    try {
+      const res = await fetch(src.url, {
+        headers: RATE_FETCH_HEADERS,
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const parsed = parseLatestRateCsv(await res.text());
+      if (!parsed) throw new Error("no numeric observation in CSV");
+      return { ...parsed, sourceName: src.name };
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[rwa-yield-fetcher] ${src.name} failed: ${e.message}`);
+    }
+  }
+  throw lastErr || new Error("no 1-month Treasury source succeeded");
+}
+
+/** Pure: apply USDM1's terms to a benchmark rate. Exported for tests. */
+function usdm1RateFromBenchmark(benchmarkPct) {
+  if (!Number.isFinite(benchmarkPct)) return null;
+  // Terms don't publish a floor; a coupon can't go negative, so clamp at 0.
+  return Math.max(0, benchmarkPct - USDM1_SPREAD_BPS / 100);
+}
+
+async function fetchUsdm1() {
+  try {
+    const t = await fetchTreasury1MoRate();
+    const pct = usdm1RateFromBenchmark(t.rate);
+    if (pct == null) throw new Error("benchmark not numeric");
+    return {
+      [USDM1_SLUG]: {
+        yield7d: `${pct.toFixed(2)}%`,
+        asOf: todayISO(),
+        source: `Issuer terms: 1-mo U.S. Treasury (${t.sourceName} ${t.rate.toFixed(2)}% on ${t.date}) minus ${USDM1_SPREAD_BPS} bps spread`,
+      },
+    };
+  } catch (e) {
+    console.warn(`[rwa-yield-fetcher] USDM1 failed: ${e.message}`);
+    return {};
+  }
+}
+
 // ── Refresh orchestration ───────────────────────────────────────────────────
 
 const REFRESHERS = [
@@ -490,6 +577,7 @@ const REFRESHERS = [
   { name: "ondo",       fn: fetchOndo },             // USDY (yield only)
   { name: "babylon",    fn: fetchBabylon },          // xSolvBTC (yield reference only — actual distribution paused)
   { name: "soroban",    fn: fetchSorobanSupplies }, // USST, XAUM, SOLVBTC, XSOLVBTC, EURAU (tvl only)
+  { name: "usdm1",      fn: fetchUsdm1 },            // USDM1 (yield only — 1-mo UST minus 200 bps)
 ];
 
 async function refreshAll() {
@@ -562,4 +650,8 @@ function getStatus() {
   };
 }
 
-module.exports = { start, stop, refreshAll, getFreshYield, getStatus };
+module.exports = {
+  start, stop, refreshAll, getFreshYield, getStatus,
+  // exported for tests
+  parseLatestRateCsv, usdm1RateFromBenchmark,
+};
