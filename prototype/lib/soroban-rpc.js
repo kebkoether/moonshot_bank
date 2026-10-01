@@ -12,6 +12,37 @@ const NETWORK_PASSPHRASE = StellarSdk.Networks.PUBLIC;
 
 const server = new rpc.Server(SOROBAN_RPC_URL);
 
+// Public Soroban RPC endpoints rate-limit aggressively (HTTP 429) once a
+// portfolio load fans out a few hundred simulations. Without a retry here,
+// every caller had to choose between swallowing the error (a $4 LP position
+// reads as $0 and gets cached that way) or failing the whole adapter.
+// Retry transport-level failures a few times with jittered backoff; contract
+// reverts and simulation errors are NOT retried — they are real answers.
+const RPC_RETRY_ATTEMPTS = parseInt(process.env.RPC_RETRY_ATTEMPTS || "4", 10);
+const RPC_RETRY_BASE_MS = parseInt(process.env.RPC_RETRY_BASE_MS || "250", 10);
+
+function isTransientRpcError(e) {
+  const msg = String(e?.message || "");
+  const status = e?.response?.status ?? e?.status;
+  return status === 429 || (status >= 500 && status < 600)
+    || /429|rate limit|too many requests|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network error|timeout/i.test(msg);
+}
+
+async function withRpcRetry(fn, label = "rpc") {
+  let lastErr;
+  for (let attempt = 0; attempt < RPC_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (!isTransientRpcError(e) || attempt === RPC_RETRY_ATTEMPTS - 1) throw e;
+      const delay = RPC_RETRY_BASE_MS * 2 ** attempt + Math.random() * RPC_RETRY_BASE_MS;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
 // ── Low-level helpers ─────────────────────────────────────────────────────────
 
 /**
@@ -31,7 +62,7 @@ async function simulateContractCall(contractId, method, args = []) {
     .setTimeout(30)
     .build();
 
-  const simResult = await server.simulateTransaction(tx);
+  const simResult = await withRpcRetry(() => server.simulateTransaction(tx), `${method}@${contractId.slice(0, 8)}`);
 
   if (rpc.Api.isSimulationError(simResult)) {
     throw new Error(`Simulation failed: ${simResult.error}`);
@@ -52,12 +83,32 @@ async function getContractData(contractId, key, durability = "persistent") {
     const dur = durability === "temporary"
       ? rpc.Durability.Temporary
       : rpc.Durability.Persistent;
-    const result = await server.getContractData(contractId, key, dur);
+    const result = await withRpcRetry(() => server.getContractData(contractId, key, dur), `getContractData@${contractId.slice(0, 8)}`);
     return result;
   } catch (e) {
     if (e.code === 404 || e.message?.includes("not found")) return null;
     throw e;
   }
+}
+
+/**
+ * Extract the stored ScVal from a getContractData() ledger entry.
+ *
+ * stellar-sdk 15 returned `val` as an xdr.LedgerEntryData union, read with
+ * `entry.val.contractData().val()`. stellar-sdk 17 returns a plain-object
+ * XDR (`entry.val.contractData.val`, properties not methods). The old idiom
+ * now throws `contractData is not a function`, and an adapter that caught
+ * that as "no record" made every Sentora deposit vanish for three weeks.
+ * Handle both shapes here, and THROW on anything else — an undecodable
+ * entry is a bug, not an empty position.
+ */
+function contractDataScVal(entry) {
+  const val = entry?.val;
+  if (!val) throw new Error("contractDataScVal: entry has no val");
+  if (typeof val.contractData === "function") return val.contractData().val();
+  if (val.contractData && val.contractData.val !== undefined) return val.contractData.val;
+  if (val.val !== undefined) return val.val; // already the ContractDataEntry
+  throw new Error(`contractDataScVal: unrecognized ledger entry shape (keys: ${Object.keys(val).join(",")})`);
 }
 
 // ── Token balance queries ─────────────────────────────────────────────────────
@@ -209,6 +260,9 @@ module.exports = {
   NETWORK_PASSPHRASE,
   simulateContractCall,
   getContractData,
+  contractDataScVal,
+  withRpcRetry,
+  isTransientRpcError,
   getTokenBalance,
   getTokenBalanceStrict,
   getTokenMetadata,

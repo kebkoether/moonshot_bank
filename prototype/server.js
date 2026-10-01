@@ -207,7 +207,7 @@ async function collectDefiPositions(address, xlmPrice) {
   const configured = PROTOCOL_ADAPTERS.filter((a) => a.isConfigured());
   const results = await Promise.allSettled(
     configured.map((a) =>
-      withTimeout(a.getPositions(address, { xlmPrice }), ADAPTER_TIMEOUT_MS, a.name || "adapter")
+      withTimeout(a.getPositions(address, { xlmPrice }), a.timeoutMs || ADAPTER_TIMEOUT_MS, a.name || "adapter")
     )
   );
 

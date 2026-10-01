@@ -210,29 +210,32 @@ async function _detectSushiV3(userAddress, priceCtx) {
       const token0 = { contractId: info.token0, code: meta0?.symbol || "?", decimals: meta0?.decimals ?? 7 };
       const token1 = { contractId: info.token1, code: meta1?.symbol || "?", decimals: meta1?.decimals ?? 7 };
 
-      // Principal at the live pool price. If the pool read fails we still
-      // list the position (with fees) rather than hide it — but never guess
-      // amounts from a price assumption.
+      // Principal at the live pool price. A failed pool/principal read is
+      // an ERROR, not a zero: the old code logged it and carried on with
+      // amount 0, so a ~$4 PYUSD/USDC position rendered as $0.00002 (fees
+      // only) whenever the RPC rate-limited mid-read. Throwing lets the
+      // server fall back to the last good result or mark us degraded.
       let amount0 = 0;
       let amount1 = 0;
       let inRange = null;
       if (liquidity > 0n) {
-        try {
-          const pool = await _sushiPool(info.token0, info.token1, info.fee);
-          if (pool) {
-            const slot0 = scValToNative(await simulateContractCall(pool, "slot0", []));
-            inRange = slot0.tick >= info.tick_lower && slot0.tick < info.tick_upper;
-            const principal = scValToNative(await simulateContractCall(
-              SUSHI_V3_POSITIONS_NFT,
-              "position_principal",
-              [_u32(info.token_id), StellarSdk.nativeToScVal(BigInt(slot0.sqrt_price_x96), { type: "u256" })]
-            ));
-            amount0 = Number(BigInt(principal[0])) / Math.pow(10, token0.decimals);
-            amount1 = Number(BigInt(principal[1])) / Math.pow(10, token1.decimals);
-          }
-        } catch (e) {
-          console.warn(`SushiV3 principal read failed for token #${info.token_id}:`, e.message);
+        const pool = await _sushiPool(info.token0, info.token1, info.fee);
+        if (!pool) {
+          throw new Error(`SushiV3 token #${info.token_id}: factory has no pool for ${token0.code}/${token1.code} fee ${info.fee}`);
         }
+        const slot0Raw = await simulateContractCall(pool, "slot0", []);
+        if (!slot0Raw) throw new Error(`SushiV3 token #${info.token_id}: slot0 returned nothing`);
+        const slot0 = scValToNative(slot0Raw);
+        inRange = slot0.tick >= info.tick_lower && slot0.tick < info.tick_upper;
+        const principalRaw = await simulateContractCall(
+          SUSHI_V3_POSITIONS_NFT,
+          "position_principal",
+          [_u32(info.token_id), StellarSdk.nativeToScVal(BigInt(slot0.sqrt_price_x96), { type: "u256" })]
+        );
+        if (!principalRaw) throw new Error(`SushiV3 token #${info.token_id}: position_principal returned nothing`);
+        const principal = scValToNative(principalRaw);
+        amount0 = Number(BigInt(principal[0])) / Math.pow(10, token0.decimals);
+        amount1 = Number(BigInt(principal[1])) / Math.pow(10, token1.decimals);
       }
 
       const [price0, price1] = await Promise.all([
@@ -269,8 +272,10 @@ async function _detectSushiV3(userAddress, priceCtx) {
     sushiCache.set(userAddress, { ts: Date.now(), positions });
     return positions;
   } catch (e) {
+    // Propagate. Swallowing this into [] made the Sushi card vanish on
+    // every RPC hiccup with nothing in defiDegraded to explain it.
     console.warn("SushiSwap V3 detection failed:", e.message);
-    return [];
+    throw new Error(`SushiSwap V3: ${e.message}`);
   }
 }
 
@@ -394,9 +399,10 @@ const LPPositionsAdapter = {
 
   async getPositions(userAddress, priceCtx) {
     const pools = await _discoverPools(userAddress);
+    // Sushi detection failure rejects the adapter (see _detectSushiV3).
     const [poolResults, sushiPositions] = await Promise.all([
       Promise.allSettled(pools.map((p) => _readLPPosition(p, userAddress, priceCtx))),
-      _detectSushiV3(userAddress, priceCtx).catch(() => []),
+      _detectSushiV3(userAddress, priceCtx),
     ]);
     const lpPositions = poolResults
       .filter((r) => r.status === "fulfilled" && r.value !== null)

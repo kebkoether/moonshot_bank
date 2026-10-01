@@ -23,10 +23,9 @@
  */
 const {
   simulateContractCall,
-  getTokenBalance,
-  getLPTotalSupply,
-  getPoolReserves,
+  getTokenBalanceStrict,
   getTokenMetadata,
+  isTransientRpcError,
 } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
 const { Address, nativeToScVal, scValToNative } = StellarSdk;
@@ -60,6 +59,26 @@ function _sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 // transient rate-limit errors (HTTP 429) with a small backoff, since
 // Soroban RPC providers return those under load. Errors that survive the
 // retry produce a null slot for that item.
+// Like _parallelMap but returns Promise.allSettled-style records so callers
+// can tell "read fine, zero" from "could not read". Rate-limit retries are
+// handled one layer down in soroban-rpc's withRpcRetry.
+async function _parallelMapSettled(items, worker, concurrency = CONCURRENCY) {
+  const out = new Array(items.length);
+  let i = 0;
+  async function pump() {
+    while (i < items.length) {
+      const idx = i++;
+      try {
+        out[idx] = { status: "fulfilled", value: await worker(items[idx], idx) };
+      } catch (e) {
+        out[idx] = { status: "rejected", reason: e };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, pump));
+  return out;
+}
+
 async function _parallelMap(items, worker, concurrency = CONCURRENCY) {
   const out = new Array(items.length);
   let i = 0;
@@ -116,14 +135,11 @@ function _priceUSD(code, priceCtx) {
 
 async function discoverAquariusPositions(userAddress, priceCtx) {
   const url = `${AQUA_API}/pools/user/${encodeURIComponent(userAddress)}/`;
-  let res;
-  try {
-    res = await fetch(url);
-    if (!res.ok) return [];
-  } catch (e) {
-    console.warn("[lp-discovery] Aquarius API failed:", e.message);
-    return [];
-  }
+  // A failed call THROWS. Returning [] here used to be cached for 5 minutes
+  // as "this wallet has no Aquarius pools" — the position blinked out of
+  // the portfolio whenever amm-api.aqua.network hiccupped.
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Aquarius API ${res.status} for ${url}`);
   const data = await res.json();
   const rows = data?.results || [];
   if (rows.length === 0) return [];
@@ -202,67 +218,91 @@ async function discoverSoroswapPositions(userAddress, priceCtx) {
 
   // Phase 1: fan out balance() calls in parallel. Almost all wallets hold
   // shares in 0-5 pairs, so 99% of these return "0".
-  const balances = await _parallelMap(pairs, async (pair) => {
-    const bal = await getTokenBalance(pair, userAddress).catch(() => "0");
-    return BigInt(bal || "0") > 0n ? { pair, bal } : null;
-  });
-  const hits = balances.filter(Boolean);
+  //
+  // Uses the STRICT balance reader: a 429 throws instead of reading as "0".
+  // With the lenient reader, 85 of 213 pair reads came back rate-limited in
+  // one sweep, each silently counted as "no shares", and the empty result
+  // was cached for 5 minutes — a real XLM/USDC position never showed.
+  // Pairs that still fail after the RPC layer's own retries get one more
+  // slow, low-concurrency pass; if any pair is STILL unreadable we throw,
+  // so the server serves its last-known-good result or marks the protocol
+  // degraded rather than reporting a confidently wrong "nothing here".
+  const readBalance = async (pair) => {
+    const bal = await getTokenBalanceStrict(pair, userAddress);
+    return { pair, bal: BigInt(bal || "0") };
+  };
+  const firstPass = await _parallelMapSettled(pairs, readBalance);
+  const failedPairs = pairs.filter((_, i) => firstPass[i].status === "rejected");
+  let results = firstPass.filter((r) => r.status === "fulfilled").map((r) => r.value);
+  if (failedPairs.length > 0) {
+    await _sleep(500 + Math.random() * 500);
+    const secondPass = await _parallelMapSettled(failedPairs, readBalance, 2);
+    const stillFailed = secondPass.filter((r) => r.status === "rejected");
+    if (stillFailed.length > 0) {
+      const sample = stillFailed[0].reason?.message || "unknown error";
+      throw new Error(`Soroswap sweep: ${stillFailed.length}/${pairs.length} pair balance reads failed (${sample})`);
+    }
+    results = results.concat(secondPass.map((r) => r.value));
+  }
+  const hits = results.filter((r) => r.bal > 0n);
   if (hits.length === 0) return [];
 
-  // Phase 2: hydrate each hit with reserves + token metadata.
-  return (await _parallelMap(hits, async ({ pair, bal }) => {
-    try {
-      const [totalSupply, reserves, t0Result, t1Result] = await Promise.all([
-        getLPTotalSupply(pair),
-        getPoolReserves(pair),
-        simulateContractCall(pair, "token_0").catch(() => null),
-        simulateContractCall(pair, "token_1").catch(() => null),
-      ]);
-      const total = BigInt(totalSupply || "0");
-      if (total === 0n) return null;
-      const share = Number(bal) / Number(total);
+  // Phase 2: hydrate each hit with reserves + token metadata. A hit we
+  // cannot hydrate is a failure, not a position to drop: throw so the
+  // adapter degrades visibly.
+  return (await _parallelMapSettled(hits, async ({ pair, bal }) => {
+    const [totalSupplyRes, reservesRes, t0Result, t1Result] = await Promise.all([
+      simulateContractCall(pair, "total_supply"),
+      simulateContractCall(pair, "get_reserves"),
+      simulateContractCall(pair, "token_0").catch(() => null),
+      simulateContractCall(pair, "token_1").catch(() => null),
+    ]);
+    const totalSupply = totalSupplyRes ? scValToNative(totalSupplyRes).toString() : "0";
+    const reserves = reservesRes ? scValToNative(reservesRes) : null;
+    const total = BigInt(totalSupply || "0");
+    if (total === 0n) return null;
+    const share = Number(bal) / Number(total);
 
-      // reserves shape varies (tuple vs array) — normalize
-      const reserveArr = Array.isArray(reserves) ? reserves : [reserves?.[0], reserves?.[1]];
-      const t0Addr = t0Result ? scValToNative(t0Result) : null;
-      const t1Addr = t1Result ? scValToNative(t1Result) : null;
-      const [m0, m1] = await Promise.all([
-        t0Addr ? _getMeta(t0Addr.toString()) : Promise.resolve({ symbol: "?", decimals: 7 }),
-        t1Addr ? _getMeta(t1Addr.toString()) : Promise.resolve({ symbol: "?", decimals: 7 }),
-      ]);
-      const sym0 = _normalizeSymbol(m0.symbol);
-      const sym1 = _normalizeSymbol(m1.symbol);
+    // reserves shape varies (tuple vs array) — normalize
+    const reserveArr = Array.isArray(reserves) ? reserves : [reserves?.[0], reserves?.[1]];
+    const t0Addr = t0Result ? scValToNative(t0Result) : null;
+    const t1Addr = t1Result ? scValToNative(t1Result) : null;
+    const [m0, m1] = await Promise.all([
+      t0Addr ? _getMeta(t0Addr.toString()) : Promise.resolve({ symbol: "?", decimals: 7 }),
+      t1Addr ? _getMeta(t1Addr.toString()) : Promise.resolve({ symbol: "?", decimals: 7 }),
+    ]);
+    const sym0 = _normalizeSymbol(m0.symbol);
+    const sym1 = _normalizeSymbol(m1.symbol);
 
-      const userAmt0 = Number(reserveArr[0] || 0) * share;
-      const userAmt1 = Number(reserveArr[1] || 0) * share;
-      const amount0 = userAmt0 / (10 ** m0.decimals);
-      const amount1 = userAmt1 / (10 ** m1.decimals);
-      const valueUSD = amount0 * _priceUSD(sym0, priceCtx)
-                     + amount1 * _priceUSD(sym1, priceCtx);
+    const userAmt0 = Number(reserveArr[0] || 0) * share;
+    const userAmt1 = Number(reserveArr[1] || 0) * share;
+    const amount0 = userAmt0 / (10 ** m0.decimals);
+    const amount1 = userAmt1 / (10 ** m1.decimals);
+    const valueUSD = amount0 * _priceUSD(sym0, priceCtx)
+                   + amount1 * _priceUSD(sym1, priceCtx);
 
-      return {
-        protocol: "soroswap",
-        type: "lp",
-        subtype: "constant_product",
-        poolContractId: pair,
-        tokens: [
-          { symbol: sym0, contractId: t0Addr?.toString() || null, decimals: m0.decimals },
-          { symbol: sym1, contractId: t1Addr?.toString() || null, decimals: m1.decimals },
-        ],
-        token0: { symbol: sym0 },
-        token1: { symbol: sym1 },
-        amounts: {
-          token0: amount0.toFixed(6).replace(/\.?0+$/, ""),
-          token1: amount1.toFixed(6).replace(/\.?0+$/, ""),
-        },
-        apy7d: null,
-        valueUSD,
-      };
-    } catch (e) {
-      console.warn(`[lp-discovery] Soroswap hydrate failed for ${pair}:`, e.message);
-      return null;
-    }
-  })).filter(Boolean);
+    return {
+      protocol: "soroswap",
+      type: "lp",
+      subtype: "constant_product",
+      poolContractId: pair,
+      tokens: [
+        { symbol: sym0, contractId: t0Addr?.toString() || null, decimals: m0.decimals },
+        { symbol: sym1, contractId: t1Addr?.toString() || null, decimals: m1.decimals },
+      ],
+      token0: { symbol: sym0 },
+      token1: { symbol: sym1 },
+      amounts: {
+        token0: amount0.toFixed(6).replace(/\.?0+$/, ""),
+        token1: amount1.toFixed(6).replace(/\.?0+$/, ""),
+      },
+      apy7d: null,
+      valueUSD,
+    };
+  })).map((r) => {
+    if (r.status === "rejected") throw new Error(`Soroswap hydrate failed: ${r.reason?.message || r.reason}`);
+    return r.value;
+  }).filter(Boolean);
 }
 
 // Per-user position cache. LP balances change over time but not per-request;
@@ -275,6 +315,11 @@ const LPDiscoveryAdapter = {
   protocolId: "lp-discovery",
   name: "LP Discovery (Aquarius + Soroswap)",
   type: "amm",
+  // The Soroswap sweep is ~214 balance() simulations; measured at ~7s on a
+  // warm universe against the public RPC, and RPC-layer retries can push it
+  // past the default 8s adapter budget. Give it room: the result is cached
+  // per wallet for 5 minutes so only the first load pays this.
+  timeoutMs: parseInt(process.env.LP_DISCOVERY_TIMEOUT_MS || "20000", 10),
 
   isConfigured() { return true; },
 
@@ -283,13 +328,15 @@ const LPDiscoveryAdapter = {
     const cached = _userPositionsCache.get(userAddress);
     if (cached && Date.now() - cached.ts < USER_POSITIONS_TTL) return cached.positions;
 
+    // Either source failing rejects the adapter (same contract as Blend
+    // after #94): the server then serves the last-known-good result for up
+    // to 10 minutes or marks "LP Discovery" degraded in the UI. The old
+    // catch-to-[] here cached an empty result for 5 minutes, so a single
+    // Aquarius API blip or RPC rate-limit erased real positions with no
+    // signal anywhere.
     const [aqua, soro] = await Promise.all([
-      discoverAquariusPositions(userAddress, priceCtx).catch(e => {
-        console.warn("[lp-discovery] Aquarius failed:", e.message); return [];
-      }),
-      discoverSoroswapPositions(userAddress, priceCtx).catch(e => {
-        console.warn("[lp-discovery] Soroswap failed:", e.message); return [];
-      }),
+      discoverAquariusPositions(userAddress, priceCtx),
+      discoverSoroswapPositions(userAddress, priceCtx),
     ]);
     const positions = [...aqua, ...soro];
     _userPositionsCache.set(userAddress, { ts: Date.now(), positions });

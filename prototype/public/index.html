@@ -1481,6 +1481,7 @@
     .defi-protocol-icon.sushi { background: linear-gradient(135deg, #d946ef, #f97316); }
     .defi-protocol-icon.solv { background: linear-gradient(135deg, #f59e0b, #ef4444); }
     .defi-protocol-icon.blend { background: linear-gradient(135deg, #10b981, #059669); }
+    .defi-protocol-icon.sentora { background: linear-gradient(135deg, #0ea5e9, #6366f1); }
     .defi-protocol-icon.default { background: var(--bg-hover); }
 
     .defi-type-badge {
@@ -6839,12 +6840,14 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           : pos.protocol === "upshift" ? "upshift"
           : pos.protocol === "aquarius" ? "aqua"
           : pos.protocol === "soroswap" ? "soroswap"
+          : pos.protocol === "sentora" ? "sentora"
           : pos.protocol === "templar" ? "templar" : "default";
         const protocolLabel = pos.protocol === "sushiswap-v3" ? (pos.poolName || "SushiSwap V3")
           : pos.protocol === "solv-protocol" ? "Solv Protocol"
           : pos.protocol === "upshift" ? (pos.vaultName ? `Upshift · ${pos.vaultName}` : "Upshift")
           : pos.protocol === "aquarius" ? (pos.poolName || "Aquarius")
           : pos.protocol === "soroswap" ? (pos.poolName || "Soroswap")
+          : pos.protocol === "sentora" ? (pos.vaultName ? `Stellar DeFi Hub · ${pos.vaultName}` : "Stellar DeFi Hub (Sentora)")
           : pos.protocol === "templar" ? (pos.vaultName || "Templar Finance") : pos.protocol;
         const typeLabel = pos.type.replace(/_/g, " ");
 
