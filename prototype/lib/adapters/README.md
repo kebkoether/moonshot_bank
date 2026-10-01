@@ -90,3 +90,14 @@ makes the array available as `defiPositions` in the API response.
 5. **Negate `valueUSD` for liability/borrow positions.** Net worth is
    supplied − borrowed, and the simplest way to make that come out right
    is for borrows to contribute negative dollars to the sum.
+6. **Return `[]` only when the chain says there is nothing. THROW when you
+   could not ask.** An RPC 429, a protocol API 5xx, or a ledger entry you
+   cannot decode is not "no position" — `collectDefiPositions` in
+   server.js turns a rejection into the last-known-good result (10 min) or
+   a `defiDegraded` entry the UI shows. Catching those into `[]` or `"0"`
+   caches a confidently wrong empty answer: this is how Sentora deposits
+   vanished for three weeks after the stellar-sdk 17 bump, and how Soroswap
+   and SushiSwap positions blinked in and out with the public RPC's rate
+   limits. Use `getTokenBalanceStrict`, let `simulateContractCall` throw,
+   and decode ledger entries with `contractDataScVal`. See
+   `test/defi-adapters.test.js` for the contract.
