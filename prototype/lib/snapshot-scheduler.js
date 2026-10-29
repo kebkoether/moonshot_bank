@@ -31,15 +31,23 @@ const TIER_INTERVALS = {
 
 const DEFAULT_TICK_INTERVAL = 60 * 1000; // Check every 60 seconds which wallets need a snapshot
 
+// A wallet whose snapshot failed, or was not recorded because a protocol
+// failed, is tried again after this long rather than on every tick.
+const RETRY_AFTER_MS = 5 * 60 * 1000;
+
 // ── Scheduler state ─────────────────────────────────────────────────────────
 
 let _interval = null;
 let _running = false;
+const _retryAt = new Map(); // address → earliest time to try again
 let _stats = {
   lastTick: null,
   totalSnapshotsTaken: 0,
   errors: 0,
   lastError: null,
+  // Snapshots not recorded because a protocol's positions could not be read.
+  incompleteSkipped: 0,
+  lastIncomplete: null, // { protocols, at }
   walletsProcessedLastTick: 0,
 };
 
@@ -81,17 +89,30 @@ async function tick() {
 
     for (const wallet of wallets) {
       if (!isDue(wallet)) continue;
+      if ((_retryAt.get(wallet.address) || 0) > Date.now()) continue;
 
       try {
         console.log(`[Scheduler] Snapshotting ${wallet.address} (${wallet.network}, tier: ${wallet.tier || "free"})`);
         const portfolioData = await _fetchPortfolio(wallet.address, wallet.network || "mainnet");
 
-        if (portfolioData) {
+        // A protocol whose positions could not be read (it failed or timed
+        // out) would be missing from the snapshot's total, and the history
+        // chart and the value for a past date would show the wallet as worth
+        // that much less (a $39.7M position, for one). No snapshot is better
+        // than a wrong one: the wallet stays due and is tried again.
+        const missing = portfolioData?.defiDegraded || [];
+        if (missing.length > 0) {
+          console.warn(`[Scheduler] Not snapshotting ${wallet.address}: ${missing.join(", ")} could not be read; retrying in ${RETRY_AFTER_MS / 60000} min`);
+          _stats.incompleteSkipped++;
+          _stats.lastIncomplete = { protocols: missing, at: new Date().toISOString() };
+          _retryAt.set(wallet.address, Date.now() + RETRY_AFTER_MS);
+        } else if (portfolioData) {
           // autoTrack: the scheduler only ever iterates wallets that are
           // already tracked, so this is a no-op in practice — but it is the
           // caller that legitimately owns the enrolment decision, so it opts in
           // explicitly rather than relying on recordSnapshot's default.
           historyDb.recordSnapshot(portfolioData, wallet.network || "mainnet", { autoTrack: true });
+          _retryAt.delete(wallet.address);
           _stats.totalSnapshotsTaken++;
           processed++;
         }
@@ -99,6 +120,7 @@ async function tick() {
         console.error(`[Scheduler] Error snapshotting ${wallet.address}:`, e.message);
         _stats.errors++;
         _stats.lastError = { address: wallet.address, message: e.message, at: new Date().toISOString() };
+        _retryAt.set(wallet.address, Date.now() + RETRY_AFTER_MS);
       }
 
       // Small delay between wallets to avoid hammering Horizon

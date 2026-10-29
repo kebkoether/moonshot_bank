@@ -122,7 +122,8 @@ const MAX_ADDRESSES_PER_REQUEST = 25;
 
 // ── Test seam ───────────────────────────────────────────────────────────────
 // Route tests must not reach Horizon, CoinGecko or nine DeFi adapters. Every
-// upstream call in POST /api/v1/portfolio goes through _deps, and
+// upstream call in POST /api/v1/portfolio goes through _deps (and the
+// Horizon, XLM price and Soroban token calls in fetchPortfolioForScheduler), and
 // __setTestDeps() is the only way to replace them — a no-op unless
 // NODE_ENV === "test", so it cannot be reached in production.
 const _deps = {
@@ -1451,7 +1452,10 @@ app.post("/api/v1/portfolio", sameOriginOnly, async (req, res) => {
         // This is a read path. It records history for wallets someone has
         // deliberately added and enrols nothing.
         try {
-          if (historyDb.isTracked(address)) {
+          // Not when a protocol could not be read: its positions are missing
+          // from walletTotalUSD, and the snapshot would record the wallet as
+          // worth that much less. The scheduler records it later.
+          if (historyDb.isTracked(address) && defiDegraded.length === 0) {
             const latest = historyDb.getLatestSnapshot(address, "mainnet");
             const lastMs = latest ? Date.parse(latest.snapshot_at.replace(" ", "T") + "Z") : 0;
             if (!Number.isFinite(lastMs) || lastMs < Date.now() - 5 * 60 * 1000) {
@@ -1867,14 +1871,22 @@ app.get("/", (req, res) => {
 
 // ── Background Snapshot Scheduler ────────────────────────────────────────────
 
+// How long the snapshot scheduler waits for one protocol's positions. A
+// background job can wait longer than a page load (ADAPTER_TIMEOUT_MS), but
+// not forever: a request that never settles would stall every snapshot.
+const SNAPSHOT_ADAPTER_TIMEOUT_MS = 60_000;
+
 /**
  * Fetch a full portfolio for a given address/network.
  * Used by the scheduler to take snapshots without an HTTP request.
+ * defiDegraded lists the protocols whose positions could not be read (they
+ * failed or timed out): they are missing from the totals, so the scheduler
+ * does not record such a portfolio as a snapshot.
  */
 async function fetchPortfolioForScheduler(address) {
-  const h = getHorizon();
+  const h = _deps.getHorizon();
   const account = await h.loadAccount(address);
-  const xlmPrice = await getXLMPrice();
+  const xlmPrice = await _deps.getXLMPrice();
 
   const balances = [];
   let totalValueUSD = 0;
@@ -1925,7 +1937,7 @@ async function fetchPortfolioForScheduler(address) {
 
   // Soroban tokens
   try {
-    const sorobanTokens = await resolveSorobanTokens(address);
+    const sorobanTokens = await _deps.resolveSorobanTokens(address);
     for (const st of sorobanTokens) {
       totalValueUSD += st.valueUSD || 0;
       balances.push(st);
@@ -1934,7 +1946,7 @@ async function fetchPortfolioForScheduler(address) {
 
   // Auto-discovered Soroban tokens (cached, so usually a no-op in the scheduler loop)
   try {
-    const rawDiscovered = await discoverSorobanTokens(address);
+    const rawDiscovered = await _deps.discoverSorobanTokens(address);
     const discoveredTokens = await dedupSACsAgainstClassicBalances(rawDiscovered, balances);
     for (const dt of discoveredTokens) {
       totalValueUSD += dt.valueUSD || 0;
@@ -1942,18 +1954,30 @@ async function fetchPortfolioForScheduler(address) {
     }
   } catch (e) { /* ignore for scheduler */ }
 
-  // DeFi positions
+  // DeFi positions: every adapter in parallel, each given
+  // SNAPSHOT_ADAPTER_TIMEOUT_MS. A failure used to be ignored, so the
+  // portfolio (and the snapshot recorded from it) simply left that protocol
+  // out; it is now listed in defiDegraded.
   const defiPositions = [];
-  for (const adapter of PROTOCOL_ADAPTERS) {
-    if (!adapter.isConfigured()) continue;
-    try {
-      const positions = await adapter.getPositions(address, { xlmPrice });
-      for (const pos of positions) {
-        totalValueUSD += pos.valueUSD || 0;
-        defiPositions.push(pos);
-      }
-    } catch (e) { /* ignore for scheduler */ }
-  }
+  const defiDegraded = [];
+  const configured = PROTOCOL_ADAPTERS.filter((a) => a.isConfigured());
+  const results = await Promise.allSettled(
+    configured.map((a) =>
+      withTimeout(a.getPositions(address, { xlmPrice }), SNAPSHOT_ADAPTER_TIMEOUT_MS, a.name || "adapter")
+    )
+  );
+  results.forEach((r, i) => {
+    const name = configured[i].name || "adapter";
+    if (r.status === "rejected") {
+      console.warn(`[Scheduler] ${name} positions unavailable for ${address}: ${r.reason?.message}`);
+      defiDegraded.push(name);
+      return;
+    }
+    for (const pos of r.value || []) {
+      totalValueUSD += pos.valueUSD || 0;
+      defiPositions.push(pos);
+    }
+  });
 
   return {
     address,
@@ -1963,6 +1987,7 @@ async function fetchPortfolioForScheduler(address) {
     balanceCount: balances.length,
     balances,
     defiPositions,
+    defiDegraded,
   };
 }
 
@@ -2050,4 +2075,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, __setTestDeps, assertAdaptersConfigured, PROTOCOL_ADAPTERS, dedupSACsAgainstClassicBalances };
+module.exports = { app, __setTestDeps, assertAdaptersConfigured, PROTOCOL_ADAPTERS, dedupSACsAgainstClassicBalances, fetchPortfolioForScheduler };
