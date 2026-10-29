@@ -298,11 +298,6 @@ async function getAssetPriceViaSDEX(assetCode, assetIssuer) {
     }
 
     const xlmPrice = await getXLMPrice();
-
-    // Seed XLM SAC price so Blend adapter avoids redundant CoinGecko call
-    pricingEngine.seedSorobanPrice("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", {
-      usd: xlmPrice.usd, change24h: xlmPrice.change24h, source: xlmPrice.stale ? "stale" : xlmPrice.source, confidence: "high",
-    });
     const priceUSD = priceInXLM * xlmPrice.usd;
 
     const price = { usd: priceUSD, xlm: priceInXLM, change24h: 0 };
@@ -1293,10 +1288,6 @@ app.post("/api/v1/portfolio", sameOriginOnly, async (req, res) => {
     // the same call in GET /account).
     await _deps.primeKnownPrices();
 
-    // Seed XLM SAC price so Blend adapter avoids redundant CoinGecko call
-    pricingEngine.seedSorobanPrice("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", {
-      usd: xlmPrice.usd, change24h: xlmPrice.change24h, source: xlmPrice.stale ? "stale" : xlmPrice.source, confidence: "high",
-    });
     const walletResults = [];
     let grandTotalUSD = 0;
 

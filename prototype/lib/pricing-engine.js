@@ -25,6 +25,7 @@ const StellarSdk = require("@stellar/stellar-sdk");
 const priceMap = require("./token-price-map");
 const aggregator = require("./soroswap-aggregator");
 const sacMapping = require("./sac-mapping");
+const xlmPrice = require("./xlm-price");
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -215,6 +216,39 @@ async function primeKnownPrices() {
 // asset, so they came back unpriced and their positions dropped out of
 // totals. lib/sac-mapping.js resolveSacAsset() identifies them (verified
 // against the contract id, so a contract can't just claim to be one).
+//
+// The SACs of XLM and of the stablecoins above are the same money as plain XLM
+// and those stablecoins, so they get the same price, before CoinGecko is asked:
+//   - XLM's SAC takes lib/xlm-price.js's price, the one every plain XLM
+//     balance is valued at: Stellar's own DEX, then CoinGecko, then its last
+//     good price (marked stale). It used to be priced through CoinGecko,
+//     unless server.js had seeded XLM's price into the cache in the last
+//     minute, which only requests that priced some asset on the DEX did. So
+//     the XLM in Blend usually had a different price from plain XLM, and
+//     whenever CoinGecko rate-limited us (common right after a restart) it
+//     could go unpriced and count as $0.
+//   - A listed stablecoin's SAC is $1, as the stablecoin is. CoinGecko had
+//     Blend's USDC at $0.9995 while plain USDC counted as $1.
+const XLM_SAC = StellarSdk.Asset.native().contractId(StellarSdk.Networks.PUBLIC);
+const STABLECOIN_SACS = new Map(
+  Object.entries(STABLECOINS).map(([key, usd]) => {
+    const [code, issuer] = key.split(":");
+    return [new StellarSdk.Asset(code, issuer).contractId(StellarSdk.Networks.PUBLIC), usd];
+  })
+);
+
+/** XLM's USD price, as plain XLM gets it, or null if there has never been one. */
+async function _xlmSacPrice() {
+  const x = await xlmPrice.getXLMPrice();
+  if (!(x && x.usd > 0)) return null;
+  return {
+    usd: x.usd,
+    change24h: x.change24h,
+    source: x.source,
+    confidence: "high",
+    ...(x.stale ? { stale: true, asOf: x.asOf } : {}),
+  };
+}
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -287,6 +321,17 @@ async function priceClassicAsset(ctx, code, issuer) {
  */
 async function priceSorobanToken(contractId, opts = {}) {
   if (!contractId) return null;
+
+  // XLM's and the stablecoins' SACs: the plain asset's price (see above).
+  // lib/xlm-price.js keeps its own cache. If it has never had a price, the
+  // layers below are tried as before.
+  if (contractId === XLM_SAC) {
+    const xlm = await _xlmSacPrice();
+    if (xlm) return xlm;
+  }
+  const stable = STABLECOIN_SACS.get(contractId);
+  if (stable !== undefined) return { usd: stable, change24h: 0, source: "stablecoin", confidence: "high" };
+
   const cacheKey = `soroban:${contractId}`;
   const cached = _cacheGet(cacheKey);
   if (cached !== undefined) return cached;
@@ -304,18 +349,13 @@ async function priceSorobanToken(contractId, opts = {}) {
       }
     }
 
-    // Layer 3: a Stellar Asset Contract takes the stablecoin or CoinGecko
-    // price of the classic asset it wraps, matched strictly on code and
-    // issuer. Not the classic SDEX layer: on thin books it values off the
-    // best bid (e.g. EURx at $0.11, GBPx at $0.29), worse than no price.
+    // Layer 3: a Stellar Asset Contract takes the CoinGecko price of the
+    // classic asset it wraps, matched strictly on code and issuer. (The
+    // stablecoins' SACs were priced above.) Not the classic SDEX layer: on
+    // thin books it values off the best bid (e.g. EURx at $0.11, GBPx at
+    // $0.29), worse than no price.
     const classic = await sacMapping.resolveSacAsset(contractId);
     if (classic) {
-      const stable = STABLECOINS[`${classic.code}:${classic.issuer}`];
-      if (stable !== undefined) {
-        const p = { usd: stable, change24h: 0, source: "stablecoin", confidence: "high" };
-        _cacheSet(cacheKey, p);
-        return p;
-      }
       const classicCgId = priceMap.lookupClassic(classic.code, classic.issuer, { strict: true });
       if (classicCgId) {
         const cg = await _coingeckoPrice(classicCgId);
@@ -359,17 +399,6 @@ async function enrichSorobanTokenWithPrice(token) {
 
 // ── Stats / debugging ────────────────────────────────────────────────────────
 
-/**
- * Pre-seed the Soroban token price cache. Useful for avoiding redundant
- * CoinGecko calls when the caller already knows the price (e.g. the server
- * fetches the XLM price for native balances — seeding the XLM SAC contract
- * here prevents a second CoinGecko call that may hit rate limits).
- */
-function seedSorobanPrice(contractId, priceObj) {
-  if (!contractId || !priceObj) return;
-  _cacheSet(`soroban:${contractId}`, priceObj);
-}
-
 function stats() {
   return {
     cacheSize: cache.size,
@@ -384,7 +413,6 @@ module.exports = {
   priceSorobanToken,
   enrichSorobanTokenWithPrice,
   primeKnownPrices,
-  seedSorobanPrice,
   STABLECOINS,
   stats,
 };
