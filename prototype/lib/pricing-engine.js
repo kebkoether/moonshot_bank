@@ -7,18 +7,19 @@
  *   1. Stablecoin shortcut    — hardcoded $1 for verified stablecoin issuers
  *   2. Token price map        — CoinGecko-id lookup, then fetch CoinGecko price
  *   3. Stellar SDEX orderbook — for classic assets, via Horizon
- *   4. Soroswap Aggregator    — via the unified Soroban AMM aggregator
+ *   4. AMM pools              — the deepest Aquarius or Soroswap pool against
+ *                               USDC or XLM (lib/soroswap-aggregator.js)
  *   5. Unpriced               — return null, caller renders "No price"
  *
  * Soroban tokens: the CoinGecko map by contract id; then, for a Stellar Asset
  * Contract, the stablecoin list and CoinGecko for the classic asset it wraps;
- * then the Soroswap Aggregator.
+ * then the AMM pools.
  *
  * Each layer returns a consistent shape so callers don't need to branch:
- *   { usd, change24h, source, confidence?, depthOk?, priceImpact? } | null
+ *   { usd, change24h, source, confidence?, depthUSD? } | null
  *
- * `source` values: 'stablecoin' | 'coingecko' | 'sdex' | 'soroswap-aggregator'
- * `confidence` (when present): 'high' | 'thin-liquidity'
+ * `source` values: 'stablecoin' | 'coingecko' | 'sdex' | 'aquarius' | 'soroswap'
+ * `confidence` (when present): 'high'
  */
 
 const StellarSdk = require("@stellar/stellar-sdk");
@@ -44,7 +45,7 @@ const STABLECOINS = {
 const cache = new Map(); // key → { price, ts }; price null = "no price found"
 
 // "No price" is remembered too, and for longer than a price. Finding none
-// means trying every layer, and the aggregator alone costs four failing RPC
+// means trying every layer, and the AMM layer alone makes several RPC
 // calls (about half a second) per token. Before this was cached, a wallet
 // holding a few unpriced tokens paid that on every load: about 3 of the
 // ~8 seconds a large Blend wallet took, against an 8-second adapter timeout.
@@ -102,7 +103,7 @@ let cgBatchTimer = null;
 const CG_BATCH_WINDOW_MS = 25;
 // When CoinGecko fails, its last price for an id is served for at most this
 // long (marked stale); after that the asset falls through to the next layer
-// (SDEX, the aggregator) or goes unpriced. A silently frozen price is how
+// (SDEX, the AMM pools) or goes unpriced. A silently frozen price is how
 // the old Freighter XLM feed went wrong for weeks.
 const CG_MAX_STALE_MS = 15 * 60 * 1000;
 
@@ -265,7 +266,7 @@ async function priceClassicAsset(ctx, code, issuer) {
       }
     }
 
-    // Layer 4: Soroswap Aggregator via SAC wrapper
+    // Layer 4: AMM pools, via the asset's Stellar Asset Contract
     const aggResult = await aggregator.priceClassicAssetViaSACInUSD(code, issuer);
     if (aggResult && aggResult.usd > 0) {
       _cacheSet(cacheKey, aggResult);
@@ -327,7 +328,7 @@ async function priceSorobanToken(contractId, opts = {}) {
       }
     }
 
-    // Layer 4: Soroswap Aggregator
+    // Layer 4: AMM pools
     const aggResult = await aggregator.priceSorobanTokenInUSD(contractId, opts.decimals || 7);
     if (aggResult && aggResult.usd > 0) {
       _cacheSet(cacheKey, aggResult);
