@@ -311,6 +311,9 @@ const _userPositionsCache = new Map();
 
 // ── Adapter interface ───────────────────────────────────────────────────────
 
+// Unclaimed AQUA (and gauge) rewards on each Aquarius position.
+const { attachAquariusRewards } = require("../aquarius-rewards");
+
 const LPDiscoveryAdapter = {
   protocolId: "lp-discovery",
   name: "LP Discovery (Aquarius + Soroswap)",
@@ -335,7 +338,8 @@ const LPDiscoveryAdapter = {
     // Aquarius API blip or RPC rate-limit erased real positions with no
     // signal anywhere.
     const [aqua, soro] = await Promise.all([
-      discoverAquariusPositions(userAddress, priceCtx),
+      discoverAquariusPositions(userAddress, priceCtx)
+        .then((rows) => attachAquariusRewards(rows, userAddress, priceCtx)),
       discoverSoroswapPositions(userAddress, priceCtx),
     ]);
     const positions = [...aqua, ...soro];

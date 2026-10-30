@@ -7081,6 +7081,23 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               ${apyHtml}
             </div>
           `;
+          // Rewards waiting to be claimed (Aquarius). Not part of Value until
+          // claimed. undefined: none for this protocol; null: couldn't be read.
+          if (pos.unclaimedRewards === null) {
+            html += `
+            <div class="defi-detail-item" title="Couldn't be read this time. Refresh to try again.">
+              <div class="defi-detail-label">Unclaimed rewards</div>
+              <div class="defi-detail-value" style="color:var(--text-muted)">—</div>
+            </div>`;
+          } else if (Array.isArray(pos.unclaimedRewards) && pos.unclaimedRewards.length > 0) {
+            const rewardLines = pos.unclaimedRewards.map((r) => `${fmt(r.amount, 2)} ${escapeHtml(r.asset)}` +
+              (r.valueUSD != null ? ` <span style="color:var(--text-muted)">(${fmtUSD(r.valueUSD)})</span>` : ""));
+            html += `
+            <div class="defi-detail-item" title="Claimable from the pool. Not included in Value until claimed.">
+              <div class="defi-detail-label">Unclaimed rewards</div>
+              <div class="defi-detail-value" style="color:var(--green)">${rewardLines.join("<br>")}</div>
+            </div>`;
+          }
         }
 
         if (pos.valueUSD !== 0 && pos.valueUSD != null) {
