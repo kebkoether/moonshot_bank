@@ -916,6 +916,9 @@ app.get("/api/v1/account/:address/snapshot-at", (req, res) => {
         valueUSD: t.value_usd,
         priceUSD: t.price_usd,
       })),
+      // { protocol, name, legs: [{ amount, asset, side }], valueUSD, stale },
+      // largest first. Empty for snapshots taken before these were kept.
+      defiPositions: snapshot.defiPositions,
     });
   } catch (e) {
     console.error("Snapshot-at error:", e.message);

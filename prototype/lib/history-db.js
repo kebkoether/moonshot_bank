@@ -10,6 +10,7 @@
 const Database = require("better-sqlite3");
 const path = require("path");
 const { cleanLabel } = require("./sanitize");
+const { summarizeDefiPosition } = require("./defi-snapshot");
 
 const DB_PATH = process.env.HISTORY_DB_PATH || path.join(__dirname, "..", "data", "history.db");
 
@@ -182,6 +183,27 @@ function runMigrations(database = db) {
 
     CREATE INDEX IF NOT EXISTS idx_defi_position_snapshots_id
       ON defi_position_snapshots(snapshot_id);
+
+    -- Every DeFi position at the time of a snapshot, summarized by
+    -- lib/defi-snapshot.js: protocol, pool or vault name, the amount of each
+    -- asset (legs_json: [{amount, asset, side}]) and the USD value. Before
+    -- this, a snapshot kept only the DeFi total and a count. stale = served
+    -- from the last good result because the adapter failed this time. ON
+    -- DELETE CASCADE, like defi_position_snapshots, so retention and
+    -- downsampling remove these rows with their snapshot.
+    CREATE TABLE IF NOT EXISTS defi_snapshot_positions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      snapshot_id INTEGER NOT NULL
+        REFERENCES portfolio_snapshots(id) ON DELETE CASCADE,
+      protocol TEXT NOT NULL,
+      name TEXT,
+      legs_json TEXT NOT NULL,
+      value_usd REAL NOT NULL,
+      stale INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_defi_snapshot_positions_id
+      ON defi_snapshot_positions(snapshot_id);
   `);
 }
 
@@ -304,6 +326,20 @@ const stmts = {
       (@snapshotId, @protocol, @poolId, @assetCode, @assetAddress, @side,
        @unitsRaw, @rateRaw, @rateDecimals, @assetDecimals,
        @underlying, @valueUSD, @priceUSD, @pendingRewards, @rewardAsset)
+  `),
+
+  insertDefiSnapshotPosition: db.prepare(`
+    INSERT INTO defi_snapshot_positions
+      (snapshot_id, protocol, name, legs_json, value_usd, stale)
+    VALUES
+      (@snapshotId, @protocol, @name, @legsJson, @valueUSD, @stale)
+  `),
+
+  getDefiSnapshotPositions: db.prepare(`
+    SELECT protocol, name, legs_json, value_usd, stale
+    FROM defi_snapshot_positions
+    WHERE snapshot_id = ?
+    ORDER BY ABS(value_usd) DESC, id ASC
   `),
 
   getDefiPositionHistory: db.prepare(`
@@ -569,6 +605,30 @@ function recordSnapshot(portfolioData, network = "mainnet", { autoTrack = false 
     insertDefi(accruing);
   }
 
+  // Every DeFi position, summarized, so a past date can show what its DeFi
+  // total was made of. Like the accrual rows above, a failure here is logged
+  // and skipped rather than thrown, so the snapshot still counts as taken.
+  try {
+    const summaries = (portfolioData.defiPositions || []).filter(Boolean).map(summarizeDefiPosition);
+    if (summaries.length) {
+      const insertSummaries = db.transaction((rows) => {
+        for (const r of rows) {
+          stmts.insertDefiSnapshotPosition.run({
+            snapshotId: Number(snapshotId),
+            protocol: r.protocol,
+            name: r.name,
+            legsJson: JSON.stringify(r.legs),
+            valueUSD: r.valueUSD,
+            stale: r.stale ? 1 : 0,
+          });
+        }
+      });
+      insertSummaries(summaries);
+    }
+  } catch (e) {
+    console.warn(`[history-db] Could not record DeFi positions for a snapshot: ${e.message}`);
+  }
+
   stmts.updateLastSnapshot.run(address);
   return snapshotId;
 }
@@ -620,7 +680,7 @@ function getTokenHistory(address, network, assetCode, range = "30d") {
 
 /**
  * Get the snapshot closest to a given ISO timestamp.
- * Returns the snapshot + its token breakdown.
+ * Returns the snapshot + its token breakdown and DeFi positions.
  */
 function getSnapshotAtDate(address, isoDate, network = "mainnet") {
   // Find the single snapshot closest to the requested timestamp
@@ -641,7 +701,16 @@ function getSnapshotAtDate(address, isoDate, network = "mainnet") {
     WHERE snapshot_id = ?
   `).all(snap.id);
 
-  return { ...snap, tokens };
+  // And its DeFi positions. Empty for snapshots taken before they were kept.
+  const defiPositions = stmts.getDefiSnapshotPositions.all(snap.id).map((r) => ({
+    protocol: r.protocol,
+    name: r.name,
+    legs: JSON.parse(r.legs_json),
+    valueUSD: r.value_usd,
+    stale: r.stale === 1,
+  }));
+
+  return { ...snap, tokens, defiPositions };
 }
 
 /**
