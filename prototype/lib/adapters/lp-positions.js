@@ -19,6 +19,7 @@
  * To add a new pool: append to KNOWN_POOLS with the right pattern.
  */
 const { simulateContractCall, getTokenBalance } = require("../soroban-rpc");
+const { lpTokenUSD } = require("../lp-token-price");
 const StellarSdk = require("@stellar/stellar-sdk");
 const { scValToNative } = StellarSdk;
 const fs = require("fs");
@@ -64,12 +65,6 @@ const KNOWN_POOLS = [];
 // concentrated-liquidity position.
 const SUSHI_V3_POSITIONS_NFT = "CARTUL5AWDZYBSN7HUUJZSKCAKCIAKM7M54Z76G6KRYCK4XPR3OHUQZ4";
 
-function _tokenPriceUSD(code, priceCtx) {
-  if (code === "USDC" || code === "PYUSD" || code === "USDY") return 1; // close enough; USDY accrues yield via price drift
-  if (code === "XLM") return priceCtx?.xlmPrice?.usd || 0;
-  return 0;
-}
-
 function _fmtAmount(n) {
   const v = parseFloat(n);
   if (!Number.isFinite(v)) return String(n);
@@ -112,10 +107,10 @@ async function _readLPPosition(pool, userAddress, priceCtx) {
     const reserve = Number(BigInt(reserves[i] || 0));
     return reserve * userPct / Math.pow(10, t.decimals);
   });
-  const valueUSD = pool.tokens.reduce(
-    (s, t, i) => s + amounts[i] * _tokenPriceUSD(t.code, priceCtx),
-    0
-  );
+  // Priced by contract, not symbol (lib/lp-token-price.js).
+  const prices = await Promise.all(pool.tokens.map((t) =>
+    lpTokenUSD(t.contractId, { symbol: t.code, decimals: t.decimals, xlmPrice: priceCtx?.xlmPrice })));
+  const valueUSD = pool.tokens.reduce((s, t, i) => s + amounts[i] * prices[i], 0);
 
   const yields = _loadLpYields();
   const y = yields.pools?.[pool.poolContractId] || {};
@@ -170,17 +165,9 @@ async function _sushiPool(token0, token1, fee) {
   return pool;
 }
 
-// Symbol-keyed pricing first (free), pricing engine as fallback so pairs
-// beyond XLM/stables (e.g. SolvBTC pools) still get a USD value.
-async function _sushiTokenPriceUSD(token, priceCtx) {
-  const bySymbol = _tokenPriceUSD(token.code, priceCtx);
-  if (bySymbol > 0) return bySymbol;
-  try {
-    const { priceSorobanToken } = require("../pricing-engine");
-    const p = await priceSorobanToken(token.contractId, { decimals: token.decimals });
-    if (p && Number.isFinite(p.usd)) return p.usd;
-  } catch (e) {}
-  return 0;
+// Priced by contract, not symbol (lib/lp-token-price.js).
+function _sushiTokenPriceUSD(token, priceCtx) {
+  return lpTokenUSD(token.contractId, { symbol: token.code, decimals: token.decimals, xlmPrice: priceCtx?.xlmPrice });
 }
 
 async function _detectSushiV3(userAddress, priceCtx) {
