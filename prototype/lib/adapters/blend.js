@@ -29,6 +29,7 @@ const StellarSdk = require("@stellar/stellar-sdk");
 const { Address, nativeToScVal, scValToNative } = StellarSdk;
 const tokenUniverse = require("../token-universe");
 const { priceSorobanToken } = require("../pricing-engine");
+const { walletBlendPools } = require("./blend-wallet-pools");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -45,6 +46,8 @@ const BLEND_V2_RATE_SCALAR_DECIMALS = 12;
 const BLEND_IR_MOD_SCALAR = 1e7;
 const SCALAR_7 = 1e7;
 
+// Blend v2's pool factory: asked whether it deployed a pool found in a
+// wallet's history (lib/adapters/blend-wallet-pools.js).
 const BLEND_POOL_FACTORY = process.env.BLEND_POOL_FACTORY ||
   "CDSYOAVXFY7SM5S64IZPPPYB4GVGGLMQVFREPSQQEZVIWXX5R23G4QSU";
 
@@ -55,8 +58,6 @@ const KNOWN_POOLS = [
   { contractId: "CBYOBT7ZCCLQCBUYYIABZLSEGDPEUWXCUXQTZYOG3YBDR7U357D5ZIRF", name: "Forex Pool V2" },
   { contractId: "CDMAVJPFXPADND3YRL4BSM3AKZWCTFMX27GLLXCML3PD62HEQS5FPVAI", name: "Etherfuse Pool V2" },
 ];
-
-const POOL_DISCOVERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 // Blend pool status (docs.blend.capital → Lending Pool → Pool Management):
 //   0 Admin_Active / 1 Active   — functioning normally
@@ -83,11 +84,11 @@ const config = {
   pools: JSON.parse(process.env.BLEND_POOLS || "[]"),
 };
 
-let _factoryPoolsCache = { pools: [], lastFetchTs: 0 };
-
+// The built-in pools and BLEND_POOLS. getPositions also reads the pools each
+// wallet has used (walletBlendPools).
 function getConfiguredPools() {
   const byId = new Map();
-  for (const list of [config.pools, KNOWN_POOLS, _factoryPoolsCache.pools]) {
+  for (const list of [config.pools, KNOWN_POOLS]) {
     for (const p of list || []) {
       if (!p || !p.contractId) continue;
       const existing = byId.get(p.contractId);
@@ -97,45 +98,6 @@ function getConfiguredPools() {
     }
   }
   return Array.from(byId.values());
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pool Factory event-scan discovery
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function _refreshFactoryPools() {
-  if (Date.now() - _factoryPoolsCache.lastFetchTs < POOL_DISCOVERY_CACHE_TTL_MS) {
-    return _factoryPoolsCache.pools;
-  }
-  try {
-    const rpc = require("../soroban-rpc");
-    if (typeof rpc.getEventsForContract === "function") {
-      const events = await rpc.getEventsForContract(BLEND_POOL_FACTORY, { limit: 200 });
-      const found = new Map();
-      for (const ev of events || []) {
-        const candidates = [
-          ...(ev.topic || []),
-          ...(ev.value ? [ev.value] : []),
-        ];
-        for (const c of candidates) {
-          const s = typeof c === "string" ? c : (c && c.toString ? c.toString() : "");
-          if (s && s.startsWith("C") && s.length >= 56 && s !== BLEND_POOL_FACTORY) {
-            if (!found.has(s)) {
-              found.set(s, { contractId: s, name: null, source: "factory" });
-            }
-          }
-        }
-      }
-      _factoryPoolsCache = { pools: Array.from(found.values()), lastFetchTs: Date.now() };
-      if (found.size > 0) {
-        console.log(`[Blend] Pool factory discovery found ${found.size} pools`);
-      }
-    }
-  } catch (e) {
-    console.warn(`[Blend] Pool factory discovery failed: ${e.message}`);
-    _factoryPoolsCache.lastFetchTs = Date.now();
-  }
-  return _factoryPoolsCache.pools;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -761,26 +723,49 @@ function _flattenPoolGroup(group) {
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
+// How long a load may spend looking for the wallet's other pools. It runs
+// while the built-in pools are read (about 3 s for a big wallet); a long
+// history is finished over the next loads.
+const WALLET_POOLS_BUDGET_MS = 3000;
+
 async function getPositions(userAddress) {
   const startedAt = Date.now();
   const run = { cancelled: false }; // stops this call's pending-BLND lookups
-  _refreshFactoryPools().catch(() => {});
-
-  const pools = getConfiguredPools();
-  if (pools.length === 0) return [];
+  const discovery = walletBlendPools(userAddress, {
+    deadline: startedAt + WALLET_POOLS_BUDGET_MS,
+    factoryId: BLEND_POOL_FACTORY,
+  });
 
   const groups = [];
   let failedPools = 0;
-  for (const pool of pools) {
-    try {
-      const group = await _resolveUserPositionsInPool(pool, userAddress, run);
-      if (group) groups.push(group);
-    } catch (e) {
-      failedPools++;
-      run.cancelled = true; // this call will throw: its pending-BLND lookups are moot
-      console.error(`[Blend] Failed to resolve pool ${pool.contractId}: ${e.message}`);
+  const readPools = async (list) => {
+    for (const pool of list) {
+      try {
+        const group = await _resolveUserPositionsInPool(pool, userAddress, run);
+        if (group) groups.push(group);
+      } catch (e) {
+        failedPools++;
+        run.cancelled = true; // this call will throw: its pending-BLND lookups are moot
+        console.error(`[Blend] Failed to resolve pool ${pool.contractId}: ${e.message}`);
+      }
     }
-  }
+  };
+
+  const pools = getConfiguredPools();
+  await readPools(pools);
+
+  // Pools from the wallet's own history that aren't built in. A pool Blend's
+  // factory didn't deploy is read the same way, and its name says so.
+  const known = new Set(pools.map((p) => p.contractId));
+  const found = (await discovery)
+    .filter((p) => !known.has(p.contractId))
+    .map((p) => ({
+      contractId: p.contractId,
+      name: p.factory ? p.name : `${p.name || "Blend pool"} (not deployed by Blend's factory)`,
+    }));
+  await readPools(found);
+  pools.push(...found);
+  if (pools.length === 0) return [];
 
   // A pool that errored may hold REAL positions. Returning the survivors
   // as a clean success meant the caller cached the shrunken result as

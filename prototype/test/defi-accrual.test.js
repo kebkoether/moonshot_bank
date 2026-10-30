@@ -23,7 +23,6 @@ const LIABILITY_D = 4_000_000_000n; // dTokens: 400.0
 
 const chain = { bRate: 1_100_000_000_000n, dRate: 1_200_000_000_000n }; // 1.1 and 1.2 at 10^12
 
-rpcLib.getEventsForContract = async () => [];
 rpcLib.getTokenMetadata = async () => ({ symbol: "USDC", decimals: 7 });
 pricing.priceSorobanToken = async () => ({ usd: 1, source: "test" });
 rpcLib.simulateContractCall = async (contractId, method) => {
@@ -43,6 +42,8 @@ rpcLib.simulateContractCall = async (contractId, method) => {
   return nativeToScVal(null);
 };
 
+// No Horizon here: the wallet has no history, so only the built-in pools are read.
+require("../lib/adapters/blend-wallet-pools")._deps.fetch = async () => ({ ok: true, status: 200, json: async () => ({ _embedded: { records: [] } }) });
 const Blend = require("../lib/adapters/blend");
 const historyDb = require("../lib/history-db");
 
