@@ -247,15 +247,33 @@ async function fetchAquarius() {
 
 // ── Blend (delegates to the adapter's pool-overview export) ─────────────────
 
+// What a pool's status means for a newcomer (Blend docs, Pool Management):
+// On Ice (2, 3) stops new borrowing; Frozen (4, 5) stops deposits too;
+// withdrawals and repayments keep working in both. Setup (6) isn't open yet.
+function blendStatusNote(status, assets) {
+  if (status === 2 || status === 3) {
+    return `On Ice: you can still supply ${assets.join(", ")} and earn interest; new borrowing is paused.`;
+  }
+  if (status === 4 || status === 5) {
+    return "Frozen: no new deposits or borrowing. Existing positions can still be repaid and withdrawn.";
+  }
+  if (status === 6) return "Being set up: not open for deposits or borrowing yet.";
+  return null;
+}
+
 async function fetchBlend() {
   const overview = await BlendAdapter.getPoolsOverview();
-  // overview: [{ name, contractId, reserves: [{symbol, suppliedUSD, borrowedUSD, supplyApy, borrowApy, utilization}] }]
+  // overview: [{ name, contractId, status, statusLabel, reserves: [{symbol, suppliedUSD, borrowedUSD, supplyApy, borrowApy, utilization}] }]
+  // Every pool's deposits count in the total, whatever its status: the money is
+  // in it. A pool that takes no deposits (Frozen, Setup) is `closed`: listed on
+  // Blend's own page, kept out of the summary and its "Top APY".
   const pools = [];
   let totalTvl = 0;
   for (const p of overview) {
     const suppliedUSD = p.reserves.reduce((s, r) => s + (r.suppliedUSD || 0), 0);
     totalTvl += suppliedUSD;
     const assets = p.reserves.map((r) => r.symbol);
+    const statusNote = blendStatusNote(p.status, assets);
     pools.push({
       assets,
       name: p.name,
@@ -273,7 +291,10 @@ async function fetchBlend() {
       })),
       address: p.contractId,
       url: `https://mainnet.blend.capital/dashboard/?poolId=${p.contractId}`,
-      note: `Lending market with ${assets.join(", ")} — supply any of these to earn ` +
+      status: p.status,
+      statusLabel: p.statusLabel || null,
+      closed: p.status != null && p.status > 3,
+      note: statusNote || `Lending market with ${assets.join(", ")} — supply any of these to earn ` +
         `interest, or borrow against your deposits. Rates float with utilization.`,
     });
   }
@@ -1051,6 +1072,10 @@ function poolDeepLink(protocolId, pool) {
   }
 }
 
+// Tests reach the Blend card and the cache here, without the refresh loop.
+getSnapshot._fetchBlend = fetchBlend;
+getSnapshot._cache = cache;
+
 function getSnapshot(opts = {}) {
   const includeAll = Boolean(opts.full);
   const protocols = [];
@@ -1064,8 +1089,10 @@ function getSnapshot(opts = {}) {
       const sorted = [...(v.pools || [])].sort((a, b) => (b.tvlUSD || 0) - (a.tvlUSD || 0));
       // The floor applies to EVERY non-exempt pool. (A blanket `|| p.reserves`
       // exemption let permissionless dust/spam Blend pools into the default
-      // view — and into the index page's "Top APY" cell.)
-      const visible = exempt ? sorted : sorted.filter((p) => (p.tvlUSD || 0) >= MIN_POOL_TVL_USD);
+      // view — and into the index page's "Top APY" cell.) A `closed` pool
+      // (no deposits) stays out of it too; the detail page still lists it.
+      const open = sorted.filter((p) => !p.closed);
+      const visible = exempt ? open : open.filter((p) => (p.tvlUSD || 0) >= MIN_POOL_TVL_USD);
       // Attach a link to each pool on the protocol's own site. Pool-level
       // `url` set by a fetcher wins; otherwise derive it.
       const withLinks = (list) => list.map((p) => ({ ...p, url: p.url || poolDeepLink(f.id, p) }));
