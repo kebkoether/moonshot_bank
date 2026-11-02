@@ -6909,6 +6909,11 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const totalBorrowed = byPool.reduce((s, p) => s + (p.totalBorrowedUSD || 0), 0);
       const netDefiUSD = totalSupplied - totalBorrowed;
       const totalPendingBlnd = byPool.reduce((s, p) => s + (p.totalPendingBlnd || 0), 0);
+      // Its value at BLND's price now, when every pool that owes some has one.
+      const owing = byPool.filter(p => p.totalPendingBlnd > 0);
+      const totalPendingBlndUSD = owing.length && owing.every(p => p.totalPendingBlndUSD != null)
+        ? owing.reduce((s, p) => s + p.totalPendingBlndUSD, 0) : null;
+      const blndUsd = (v) => (v != null ? ` <span style="color:var(--text-muted)">(≈${fmtUSD(v)})</span>` : "");
       // null = a pool's pending BLND could not be read this time. Show "—"
       // rather than a total that is quietly too small.
       const pendingBlndUnknown = byPool.some(p => p.totalPendingBlnd === null);
@@ -6935,7 +6940,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         if (pendingBlndUnknown) {
           html += `<div class="defi-summary-stat" title="Pending BLND could not be read for every pool. Refresh to try again."><div class="label">Pending BLND</div><div class="value">—</div></div>`;
         } else if (totalPendingBlnd > 0) {
-          html += `<div class="defi-summary-stat"><div class="label">Pending BLND</div><div class="value">${fmtBlnd(totalPendingBlnd)}</div></div>`;
+          html += `<div class="defi-summary-stat" title="Not in the totals until claimed"><div class="label">Pending BLND</div><div class="value">${fmtBlnd(totalPendingBlnd)}${blndUsd(totalPendingBlndUSD)}</div></div>`;
         }
         html += `</div>`;
       }
@@ -7032,7 +7037,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         }
         const footerRight = [];
         if (group.totalPendingBlnd > 0) {
-          footerRight.push(`<span class="emission-pill">+${fmtBlnd(group.totalPendingBlnd)} BLND pending</span>`);
+          footerRight.push(`<span class="emission-pill" title="Not in the totals until claimed">+${fmtBlnd(group.totalPendingBlnd)} BLND pending${blndUsd(group.totalPendingBlndUSD)}</span>`);
         }
         if (footerLeft.length > 0 || footerRight.length > 0) {
           html += `<div class="defi-pool-footer">`;

@@ -506,6 +506,30 @@ async function _attachPendingBlnd(groups, deadlineAt) {
   }
 }
 
+// BLND's Stellar Asset Contract (BLND:GDJEHTBE6ZHUXSWFI642DCGLUOECLHPF3KSXHPXTSTJ7E3JF6MQ5EZYY).
+const BLND_SAC = "CD25MNVTZDL4Y3XBCPCJXGXATV5WUHHOWMYFF4YBEGU5FCPGMYTVG5JY";
+const BLND_PRICE_WAIT_MS = 1000;
+
+/**
+ * Pending BLND in USD on each pool group (totalPendingBlndUSD), at BLND's
+ * price now, so rewards income has a value next to its amount. null when the
+ * amount or the price isn't known; 0 when nothing is owed. Like the amount,
+ * it is not added to any total: it isn't the wallet's until claimed.
+ * Waits at most BLND_PRICE_WAIT_MS, and never past `deadlineAt`.
+ */
+async function _attachPendingBlndUSD(groups, deadlineAt) {
+  for (const g of groups) g.totalPendingBlndUSD = g.totalPendingBlnd === 0 ? 0 : null;
+  const owed = groups.filter((g) => g.totalPendingBlnd > 0);
+  if (owed.length === 0) return;
+  let timer;
+  const waitMs = Math.max(0, Math.min(BLND_PRICE_WAIT_MS, deadlineAt - Date.now()));
+  const price = await Promise.race([
+    priceSorobanToken(BLND_SAC).then((p) => (p && p.usd > 0 ? p.usd : null), () => null),
+    new Promise((resolve) => { timer = setTimeout(() => resolve(null), waitMs); }),
+  ]).finally(() => clearTimeout(timer));
+  for (const g of owed) g.totalPendingBlndUSD = price == null ? null : g.totalPendingBlnd * price;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Position row building
 // ─────────────────────────────────────────────────────────────────────────────
@@ -779,6 +803,7 @@ async function getPositions(userAddress) {
 
   await _attachPendingBlnd(groups, startedAt + ADAPTER_TIMEOUT_MS - PENDING_BLND_MARGIN_MS);
   run.cancelled = true; // anything still running has missed its chance
+  await _attachPendingBlndUSD(groups, startedAt + ADAPTER_TIMEOUT_MS - PENDING_BLND_MARGIN_MS / 3);
 
   const flat = [];
   for (const g of groups) flat.push(..._flattenPoolGroup(g));
@@ -887,6 +912,7 @@ const BlendAdapter = {
   claimableEmissions,
   currentEmissionIndex,
   _clearEmissionsCache: () => _reserveEmissionsCache.clear(), // tests only
+  _attachPendingBlndUSD, // tests only
 };
 
 module.exports = BlendAdapter;
