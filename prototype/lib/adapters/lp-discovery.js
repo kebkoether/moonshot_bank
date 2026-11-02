@@ -29,6 +29,7 @@ const {
 } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
 const { Address, nativeToScVal, scValToNative } = StellarSdk;
+const { lpTokenUSD } = require("../lp-token-price");
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -121,16 +122,6 @@ function _normalizeSymbol(sym) {
   return s;
 }
 
-function _priceUSD(code, priceCtx) {
-  if (!code) return 0;
-  const c = _normalizeSymbol(code).toUpperCase();
-  // Stablecoins we treat as $1. USDY drifts up over time, but treating
-  // it as $1 is close enough for LP valuation.
-  if (["USDC","USDY","PYUSD","USDX","EURC","MGUSD","USST","YLDS","USTBL"].includes(c)) return 1;
-  if (c === "XLM") return priceCtx?.xlmPrice?.usd || 0;
-  return 0;
-}
-
 // ── Aquarius (HTTP API) ─────────────────────────────────────────────────────
 
 async function discoverAquariusPositions(userAddress, priceCtx) {
@@ -147,7 +138,9 @@ async function discoverAquariusPositions(userAddress, priceCtx) {
   // Aquarius returns `balance` (LP share amount as decimal string) and
   // `deposited_tokens` (per-token underlying amount at current price).
   // Both fields are floats, high-precision — we just parse and format.
-  return rows.map(row => {
+  // Each token is priced by its contract (tokens_addresses): see
+  // lib/lp-token-price.js.
+  return Promise.all(rows.map(async (row) => {
     const tokensStr = row.tokens_str || [];  // "USDY:G...", "USDC:G..."
     const codes = tokensStr.map(t => _normalizeSymbol((t.split(":")[0] || "").trim() || "?"));
     const deposited = row.deposited_tokens || {};
@@ -157,7 +150,7 @@ async function discoverAquariusPositions(userAddress, priceCtx) {
       const key = tokensStr[i];
       const amountStr = deposited[key] || "0";
       const amount = parseFloat(amountStr) || 0;
-      const price = _priceUSD(codes[i], priceCtx);
+      const price = await lpTokenUSD((row.tokens_addresses || [])[i], { symbol: codes[i], xlmPrice: priceCtx?.xlmPrice });
       valueUSD += amount * price;
       amounts.push({ symbol: codes[i], amount: amount.toFixed(6).replace(/\.?0+$/, "") });
     }
@@ -177,7 +170,7 @@ async function discoverAquariusPositions(userAddress, priceCtx) {
       apy7d: null, // Aquarius API doesn't expose per-pool APR/APY directly
       valueUSD,
     };
-  });
+  }));
 }
 
 // ── Soroswap (on-chain factory enumeration) ─────────────────────────────────
@@ -278,8 +271,12 @@ async function discoverSoroswapPositions(userAddress, priceCtx) {
     const userAmt1 = Number(reserveArr[1] || 0) * share;
     const amount0 = userAmt0 / (10 ** m0.decimals);
     const amount1 = userAmt1 / (10 ** m1.decimals);
-    const valueUSD = amount0 * _priceUSD(sym0, priceCtx)
-                   + amount1 * _priceUSD(sym1, priceCtx);
+    // Priced by contract, not symbol (lib/lp-token-price.js).
+    const [price0, price1] = await Promise.all([
+      lpTokenUSD(t0Addr?.toString(), { symbol: sym0, decimals: m0.decimals, xlmPrice: priceCtx?.xlmPrice }),
+      lpTokenUSD(t1Addr?.toString(), { symbol: sym1, decimals: m1.decimals, xlmPrice: priceCtx?.xlmPrice }),
+    ]);
+    const valueUSD = amount0 * price0 + amount1 * price1;
 
     return {
       protocol: "soroswap",

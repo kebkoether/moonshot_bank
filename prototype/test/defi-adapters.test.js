@@ -178,6 +178,16 @@ rpcLib.getTokenMetadata = async (id) => (id === XLM_SAC
 const LPDiscovery = require("../lib/adapters/lp-discovery");
 restore(); // the adapter holds its own references now; put the module back for everyone else
 
+// Pool tokens are priced by contract through the pricing engine
+// (lib/lp-token-price.js). Pin those prices so these tests don't reach
+// CoinGecko or depend on its answer.
+const pricing = require("../lib/pricing-engine");
+function pinLpPrices(t, prices = { [USDC_SAC]: 1 }) {
+  const real = pricing.priceSorobanToken;
+  pricing.priceSorobanToken = async (c) => (prices[c] != null ? { usd: prices[c], source: "test" } : null);
+  t.after(() => { pricing.priceSorobanToken = real; });
+}
+
 function soroswapUniverseSimulate(extra = {}) {
   return async (contract, method, args) => {
     if (method === "all_pairs_length") return S.nativeToScVal(2, { type: "u32" });
@@ -199,6 +209,7 @@ function aquaFetchEmpty() {
 }
 
 test("Soroswap: a pair whose balance read fails once is retried and still found", async (t) => {
+  pinLpPrices(t);
   const realFetch = global.fetch;
   t.after(() => { global.fetch = realFetch; });
   global.fetch = aquaFetchEmpty();
@@ -218,6 +229,7 @@ test("Soroswap: a pair whose balance read fails once is retried and still found"
 });
 
 test("Soroswap: persistent rate-limiting REJECTS instead of caching 'no positions'", async (t) => {
+  pinLpPrices(t);
   const realFetch = global.fetch;
   t.after(() => { global.fetch = realFetch; });
   global.fetch = aquaFetchEmpty();
@@ -234,6 +246,7 @@ test("Soroswap: persistent rate-limiting REJECTS instead of caching 'no position
 });
 
 test("Aquarius: a non-OK API response REJECTS instead of reading as 'no pools'", async (t) => {
+  pinLpPrices(t);
   const realFetch = global.fetch;
   t.after(() => { global.fetch = realFetch; });
   global.fetch = async () => ({ ok: false, status: 502, json: async () => ({}) });
@@ -246,6 +259,8 @@ test("Aquarius: a non-OK API response REJECTS instead of reading as 'no pools'",
 });
 
 test("Aquarius: parses the (absurdly long-precision) deposited_tokens the API returns", async (t) => {
+  // USDY at its market price, no longer counted as $1 (see lib/lp-token-price.js).
+  pinLpPrices(t, { [USDC_SAC]: 1, CB3YA656OYIHU57657I5KGSBRHE5I3OZU4VFC22PYAOANFZHEWNYGAGP: 1.15 });
   const realFetch = global.fetch;
   t.after(() => { global.fetch = realFetch; });
   global.fetch = async () => ({
@@ -269,7 +284,8 @@ test("Aquarius: parses the (absurdly long-precision) deposited_tokens the API re
   assert.ok(aqua, "aquarius position present");
   assert.equal(aqua.token0.symbol, "USDY");
   assert.equal(aqua.amounts.token0, "1.992615");
-  assert.ok(Math.abs(aqua.valueUSD - 4.2511) < 0.001, `valueUSD ${aqua.valueUSD}`);
+  // 1.992615 USDY at $1.15 + 2.2584874 USDC at $1
+  assert.ok(Math.abs(aqua.valueUSD - 4.5500946) < 0.001, `valueUSD ${aqua.valueUSD}`);
 });
 
 // ── SushiSwap V3 (lp-positions) ─────────────────────────────────────────────
