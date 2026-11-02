@@ -22,7 +22,6 @@ const USDC = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75";
 const OUSD = StrKey.encodeContract(crypto.randomBytes(32)); // an asset with no price
 
 const RATE = 1_000_000_000_000n; // 1.0 at 10^12
-rpcLib.getEventsForContract = async () => [];
 rpcLib.getTokenMetadata = async (c) => ({ symbol: c === USDC ? "USDC" : "oUSD", decimals: 7 });
 pricing.priceSorobanToken = async (c) => (c === USDC ? { usd: 1, source: "test" } : null);
 rpcLib.simulateContractCall = async (contractId, method, args = []) => {
@@ -44,6 +43,8 @@ rpcLib.simulateContractCall = async (contractId, method, args = []) => {
   return nativeToScVal(null); // no emissions
 };
 
+// No Horizon here: the wallet has no history, so only the built-in pools are read.
+require("../lib/adapters/blend-wallet-pools")._deps.fetch = async () => ({ ok: true, status: 200, json: async () => ({ _embedded: { records: [] } }) });
 const Blend = require("../lib/adapters/blend");
 
 test("a position in an unpriced asset is kept, by amount, marked unpriced", async () => {

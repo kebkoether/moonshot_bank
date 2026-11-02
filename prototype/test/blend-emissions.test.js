@@ -62,7 +62,6 @@ let slowReserveMs = 0;
 let inFlight = 0;
 let maxInFlight = 0;
 
-rpcLib.getEventsForContract = async () => [];
 rpcLib.getTokenMetadata = async () => ({ symbol: "TKN", decimals: 7 });
 pricing.priceSorobanToken = async () => ({ usd: 1, source: "test" });
 rpcLib.simulateContractCall = async (contractId, method, args = []) => {
@@ -111,6 +110,8 @@ rpcLib.simulateContractCall = async (contractId, method, args = []) => {
   throw new Error(`unmocked ${method}`);
 };
 
+// No Horizon here: the wallet has no history, so only the built-in pools are read.
+require("../lib/adapters/blend-wallet-pools")._deps.fetch = async () => ({ ok: true, status: 200, json: async () => ({ _embedded: { records: [] } }) });
 const Blend = require("../lib/adapters/blend");
 const { claimableEmissions, currentEmissionIndex } = Blend;
 
