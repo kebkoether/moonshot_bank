@@ -95,6 +95,11 @@ function request(app, method, url, { body, headers = {} } = {}) {
           },
         },
         (res) => {
+          // Decode as a stream: `raw += chunk` decoded each Buffer chunk on its
+          // own, so a multi-byte character split across two chunks (a "─" in
+          // index.html, depending on where the chunks fall) came out as two
+          // U+FFFD, and the inline-script hash test failed for that reason alone.
+          res.setEncoding("utf8");
           let raw = "";
           res.on("data", (c) => { raw += c; });
           res.on("end", () => {

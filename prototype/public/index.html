@@ -3309,6 +3309,8 @@
     </div>
   </div>
 
+  <!-- Builds the "Download CSV" file (holdings and DeFi positions). -->
+  <script src="holdings-csv.js"></script>
   <script>
     // localStorage key for the currently-connected wallet address. The
     // module-<script> at the top also declares this — but const inside a
@@ -5610,6 +5612,9 @@
         case "go-to-date":
           goToDate();
           break;
+        case "download-csv":
+          downloadHoldingsCsv();
+          break;
 
         // Cramer overlay. The backdrop closes only on a click on itself, not
         // on a click that bubbled up from the panel inside it.
@@ -5939,7 +5944,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div class="meta-item">DeFi: <span>${defiPositions.length}</span></div>
             </div>
           </div>
-          <button class="btn btn-secondary" data-action="load-multi-wallet-portfolio">Refresh</button>
+          <div style="display:flex; gap:8px">
+            <button class="btn btn-secondary" data-action="download-csv" title="Every balance and DeFi position in this wallet, as a spreadsheet file">Download CSV</button>
+            <button class="btn btn-secondary" data-action="load-multi-wallet-portfolio">Refresh</button>
+          </div>
         </div>
 
         <div class="tabs">
@@ -6012,6 +6020,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           <div class="agg-subtitle">${totalWallets} wallet${totalWallets !== 1 ? "s" : ""} · ${currentNetwork}</div>
           <div class="agg-total">${fmtBigUSD(d.totalValueUSD)}</div>
           ${chipsHTML}
+          <button class="btn btn-secondary" style="margin-top:12px" data-action="download-csv" title="Every balance and DeFi position in all these wallets, as a spreadsheet file">Download CSV</button>
         </div>
 
         ${breakdownHTML}
@@ -6498,6 +6507,27 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       }
     }
 
+    // "Download CSV": what's on screen, from the data already loaded (no new
+    // requests), so the file matches the page. The all-wallets view gives
+    // every wallet; a single wallet gives that one. public/holdings-csv.js
+    // builds the rows.
+    function downloadHoldingsCsv() {
+      const all = multiWalletMode && activeView === "all" && portfolioData;
+      const source = all ? portfolioData : currentData;
+      const wallets = all ? (portfolioData.wallets || []) : (currentData ? [currentData] : []);
+      if (!source || wallets.length === 0 || !window.HoldingsCsv) return;
+      const asOf = source.lastUpdated || new Date().toISOString();
+      // The byte-order mark tells Excel the file is UTF-8.
+      const blob = new Blob(["\uFEFF" + HoldingsCsv.build(wallets, { asOf })], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = HoldingsCsv.fileName(all ? null : wallets[0].address, asOf);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    }
+
     function backToLive() {
       timeTravelDate = null;
       timeTravelSnapshot = null;
@@ -6659,7 +6689,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div class="meta-item">Updated: <span>${timeAgo(d.lastUpdated)}</span></div>
             </div>
           </div>
-          <button class="btn btn-secondary" data-action="load-portfolio">Refresh</button>
+          <div style="display:flex; gap:8px">
+            <button class="btn btn-secondary" data-action="download-csv" title="Every balance and DeFi position in this wallet, as a spreadsheet file">Download CSV</button>
+            <button class="btn btn-secondary" data-action="load-portfolio">Refresh</button>
+          </div>
         </div>
 
         ${breakdownHTML}
