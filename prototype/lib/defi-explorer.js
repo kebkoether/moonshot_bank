@@ -664,6 +664,18 @@ async function fetchTemplar() {
   const configs = new Map();
   for (const m of marketsJson.markets || []) configs.set(m.deployment, m);
 
+  // Collateral decimals by collateral (the deployment's first part), from
+  // every market config Templar publishes, current and deprecated. A market
+  // can have a snapshot but no config of its own: ixlmdejaaa-ixlmusdc-2 has
+  // none, and the old fallback of 8 decimals read its 18-decimal deJAAA as
+  // 10^10 times too much, so the card showed $3.98 quadrillion.
+  const collatDecimalsBySlug = new Map();
+  for (const m of [...(marketsJson.markets || []), ...(marketsJson.deprecatedMarkets || [])]) {
+    const d = m?.configuration?.price_oracle_configuration?.collateral_asset_decimals;
+    const { collat } = templarSlugParts(m?.deployment || "");
+    if (Number.isInteger(d) && collat && !collatDecimalsBySlug.has(collat)) collatDecimalsBySlug.set(collat, d);
+  }
+
   // Price the collateral legs via CoinGecko (verified id set above)
   const cgIds = [
     ...new Set(Object.values(TEMPLAR_CG_IDS).filter((id) => !id.startsWith("soroban:"))),
@@ -717,9 +729,13 @@ async function fetchTemplar() {
       : Number(entry.totalDepositsRaw || 0) *
         (prices[TEMPLAR_CG_IDS[borrow]]?.usd || 0);
 
+    // No decimals from the market's config or any other market with the same
+    // collateral: leave the collateral out rather than guess (deposits count).
     const collatDecimals =
-      cfg?.configuration?.price_oracle_configuration?.collateral_asset_decimals ?? 8;
-    const collatUnits = Number(snap.collateral_asset_deposited || 0) / 10 ** collatDecimals;
+      cfg?.configuration?.price_oracle_configuration?.collateral_asset_decimals ??
+      collatDecimalsBySlug.get(collat);
+    const collatKnown = Number.isInteger(collatDecimals);
+    const collatUnits = collatKnown ? Number(snap.collateral_asset_deposited || 0) / 10 ** collatDecimals : 0;
     const collatPrice = prices[TEMPLAR_CG_IDS[collat]]?.usd || 0;
     const collatUSD = collatUnits * collatPrice;
 
@@ -746,6 +762,7 @@ async function fetchTemplar() {
         `Supply ${templarPretty(borrow)} to earn ${(supplyApy * 100).toFixed(2)}%; ` +
         `borrow against ${templarPretty(collat)} at ${(borrowApr * 100).toFixed(2)}% APR. ` +
         `$${Math.round(Number(entry.availableBalance || 0)).toLocaleString()} available to borrow.` +
+        (collatKnown ? "" : ` ${templarPretty(collat)} collateral not valued (its decimals aren't published).`) +
         (stellarSide ? " Stellar-side assets." : " Non-Stellar deployment — excluded from Stellar TVL."),
       detail: {
         supplyApy, borrowApr,
@@ -765,6 +782,8 @@ async function fetchTemplar() {
     pools,
   };
 }
+// Tests reach the Templar fetcher here, without running the refresh loop.
+getSnapshot._fetchTemplar = fetchTemplar;
 // ── Refresh orchestration ───────────────────────────────────────────────────
 
 // protocolId -> { ts, value, error, lastAttempt }
