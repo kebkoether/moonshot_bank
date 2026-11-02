@@ -7037,15 +7037,23 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
                  <div class="defi-detail-value" style="color:var(--red)">${escapeHtml(String(pos.borrow.amount))} ${escapeHtml(pos.borrow.asset)}</div>
                </div>`
             : "";
+          // A borrow-only position has no deposit; an adapter that can't see
+          // yield (Templar: interest lives on NEAR) sends accrued: null.
+          const depositedText = pos.deposited
+            ? `${escapeHtml(String(pos.deposited.amount))} ${escapeHtml(String(pos.deposited.asset))}`
+            : "—";
+          const yieldText = pos.yield && pos.yield.accrued != null
+            ? `${escapeHtml(String(pos.yield.accrued))} ${escapeHtml(String(pos.yield.asset))}`
+            : "—";
           html += `
             <div class="defi-detail-item">
               <div class="defi-detail-label">${collateralLabel}</div>
-              <div class="defi-detail-value">${pos.deposited.amount} ${pos.deposited.asset}</div>
+              <div class="defi-detail-value">${depositedText}</div>
             </div>
             ${borrowRow}
             <div class="defi-detail-item">
               <div class="defi-detail-label">Yield Earned</div>
-              <div class="defi-detail-value" style="color:var(--green)">${pos.yield.accrued} ${pos.yield.asset}</div>
+              <div class="defi-detail-value" style="color:var(--green)">${yieldText}</div>
             </div>
             <div class="defi-detail-item">
               <div class="defi-detail-label">APY</div>
@@ -7095,6 +7103,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         }
 
         html += `</div>`;
+        if (pos.incomplete) {
+          html += `<div style="font-size:12px; color:var(--text-muted); margin-top:8px">` +
+            `This wallet's history is too long to read in full, so these amounts may be incomplete.</div>`;
+        }
         html += `</div>`;
       });
 
