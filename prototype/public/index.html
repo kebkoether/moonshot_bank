@@ -6542,6 +6542,47 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           <div class="card-header">Balances at ${new Date(snap.snapshotDate).toLocaleString()}</div>
           ${tokensHTML}
         </div>
+        ${renderTimeTravelDefi(snap)}
+      `;
+    }
+
+    // The snapshot's DeFi positions: protocol and pool or vault, the amount
+    // of each asset, and the USD value, largest first. Snapshots taken
+    // before positions were kept with them have only the count.
+    const TIME_TRAVEL_PROTOCOL_NAMES = {
+      blend: "Blend", k2: "K2 Lend", templar: "Templar Finance", upshift: "Upshift",
+      sentora: "Stellar DeFi Hub (Sentora)", aquarius: "Aquarius", soroswap: "Soroswap",
+      "sushiswap-v3": "SushiSwap V3", "solv-protocol": "Solv Protocol",
+    };
+    function renderTimeTravelDefi(snap) {
+      const positions = snap.defiPositions || [];
+      if (positions.length === 0 && !(snap.defiPositionCount > 0)) return "";
+      const legText = (l) => `${fmt(l.amount, 2)} ${escapeHtml(l.asset)}` +
+        (l.side === "supplied" || l.side === "borrowed" || l.side === "staked" ? ` ${l.side}` : "");
+      const usdText = (v) => (v < 0
+        ? `<span style="color: var(--red)">-${fmtUSD(-v)}</span>`
+        : fmtUSD(v));
+      const rows = positions.length > 0
+        ? positions.map((d) => {
+          const protocol = TIME_TRAVEL_PROTOCOL_NAMES[d.protocol] || d.protocol;
+          return `
+          <div class="token-row">
+            <div class="token-info">
+              <div class="token-icon">${escapeHtml((protocol || "?")[0])}</div>
+              <div>
+                <div class="token-name">${escapeHtml(protocol)}${d.name ? ` · ${escapeHtml(d.name)}` : ""}${d.stale ? ` <span style="color: var(--text-muted); font-size: 12px;">(last good result)</span>` : ""}</div>
+                <div class="token-balance">${d.legs.map(legText).join(" + ") || "—"}</div>
+              </div>
+            </div>
+            <div class="token-value"><div>${usdText(d.valueUSD)}</div></div>
+          </div>`;
+        }).join("")
+        : `<div style="text-align:center; color: var(--text-muted); padding: 40px;">This snapshot was taken before DeFi positions were saved with snapshots: only its total includes them.</div>`;
+      return `
+        <div class="card">
+          <div class="card-header">DeFi positions at ${new Date(snap.snapshotDate).toLocaleString()}</div>
+          ${rows}
+        </div>
       `;
     }
 
