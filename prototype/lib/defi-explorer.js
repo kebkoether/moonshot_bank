@@ -14,7 +14,9 @@
  *     path. Stale-grace: a failed refresh keeps the previous value up to
  *     24h so transient API outages don't blank the page.
  *   - Per-protocol refresh intervals reflect data-source cost:
- *       Aquarius / Upshift  (one HTTP call)      → every cycle (60s min gap)
+ *       Aquarius            (one HTTP call)      → every cycle (60s min gap)
+ *       Upshift             (one 13 MB call; Upshift updates daily) → 1h,
+ *                           5 min after a failure
  *       Blend               (~30 RPC calls)      → 5 min
  *       Sentora             (1 RPC call)         → 5 min
  *       SushiSwap           (universe 1h, data 5 min)
@@ -510,9 +512,18 @@ async function fetchSoroswap() {
 
 // ── Upshift ─────────────────────────────────────────────────────────────────
 
+// Upshift's API has no filter: every call returns its whole list, every vault
+// on every chain. On 2026-10-30 that was 164 vaults and 13.1 MB, taking 12-20
+// s, for the 10 vaults on Stellar. Upshift recomputes TVL and APY once a day
+// (metrics_last_updated is just after 00:00 UTC), so this is fetched hourly
+// (see FETCHERS), not every minute. The timeout keeps a stalled download from
+// holding up the refresh loop, and with it every other protocol.
+const UPSHIFT_TIMEOUT_MS = 60_000;
+
 async function fetchUpshift() {
   const res = await fetch("https://api.upshift.finance/v1/tokenized_vaults", {
     headers: { "User-Agent": "StellarScope/1.0" },
+    signal: AbortSignal.timeout(UPSHIFT_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`Upshift HTTP ${res.status}`);
   const all = await res.json();
@@ -937,7 +948,9 @@ const FETCHERS = [
   { id: "aquarius", fn: fetchAquarius, interval: 60_000 },
   { id: "soroswap", fn: fetchSoroswap, interval: 15 * 60_000 },
   { id: "sushiswap", fn: fetchSushi, interval: 5 * 60_000 },
-  { id: "upshift", fn: fetchUpshift, interval: 60_000 },
+  // Hourly: 13 MB per call, numbers that change daily (see fetchUpshift).
+  // After a failure, try again in 5 minutes; the last good list is still served.
+  { id: "upshift", fn: fetchUpshift, interval: 60 * 60_000, retryInterval: 5 * 60_000 },
   { id: "sentora", fn: fetchSentora, interval: 5 * 60_000 },
   { id: "templar", fn: fetchTemplar, interval: 10 * 60_000 },
   { id: "k2", fn: fetchK2, interval: 5 * 60_000 },
@@ -946,13 +959,17 @@ const FETCHERS = [
 
 let _refreshing = false;
 
-async function refreshOnce() {
+// opts.only: refresh just these protocol ids (tests).
+async function refreshOnce(opts = {}) {
   if (_refreshing) return;
   _refreshing = true;
   try {
     for (const f of FETCHERS) {
+      if (opts.only && !opts.only.includes(f.id)) continue;
       const entry = cache.get(f.id);
-      const due = !entry || Date.now() - (entry.lastAttempt || 0) >= f.interval;
+      // A fetcher with a retryInterval tries again sooner after a failure.
+      const wait = entry?.error != null && f.retryInterval ? f.retryInterval : f.interval;
+      const due = !entry || Date.now() - (entry.lastAttempt || 0) >= wait;
       if (!due) continue;
       const prev = entry || {};
       cache.set(f.id, { ...prev, lastAttempt: Date.now() });
@@ -1070,4 +1087,9 @@ function getProtocolDetail(id) {
   return snap.protocols.find((p) => p.id === id) || null;
 }
 
-module.exports = { start, getSnapshot, getProtocolDetail, refreshOnce, MIN_POOL_TVL_USD };
+function _resetForTests() {
+  cache.clear();
+  _refreshing = false;
+}
+
+module.exports = { start, getSnapshot, getProtocolDetail, refreshOnce, _resetForTests, MIN_POOL_TVL_USD };
