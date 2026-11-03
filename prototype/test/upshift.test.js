@@ -188,6 +188,13 @@ test("a failed convert_to_assets read fails the adapter instead of valuing share
   await assert.rejects(Upshift.getPositions(wallet().publicKey(), ctx), /timeout/);
 });
 
+test("a busy RPC ('preflight queue full') on convert_to_assets fails the adapter too, not 1:1", async () => {
+  shares.set(SENT_USDC, 1_000n);
+  rateTenths.set(SENT_USDC, 11);
+  convertFailing.set(SENT_USDC, new Error("Simulation failed: preflight queue full"));
+  await assert.rejects(Upshift.getPositions(wallet().publicKey(), ctx), /preflight queue full/);
+});
+
 test("a vault without convert_to_assets is still valued 1:1", async () => {
   shares.set(SENT_USDC, 1_000n);
   noConvert.add(SENT_USDC);
