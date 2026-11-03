@@ -40,6 +40,7 @@ rpcLib.simulateContractCall = async (contractId, method, args = []) => {
     throw new Error("no name() in this test");
   }
   if (method === "get_reserve_list") return nativeToScVal(contractId === POOL ? [XLM_SAC, USDC_SAC] : []);
+  if (contractId !== POOL && method === "get_positions") return nativeToScVal({ collateral: {}, liabilities: {}, supply: {} }); // nothing held there
   if (contractId !== POOL) throw new Error(`unexpected ${method}`);
   if (method === "get_positions") {
     return nativeToScVal({

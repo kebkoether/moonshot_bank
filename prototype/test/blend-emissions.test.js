@@ -66,6 +66,8 @@ rpcLib.getTokenMetadata = async () => ({ symbol: "TKN", decimals: 7 });
 pricing.priceSorobanToken = async () => ({ usd: 1, source: "test" });
 rpcLib.simulateContractCall = async (contractId, method, args = []) => {
   if (contractId !== POOL) {
+    // The other built-in pools: the wallet holds nothing there.
+    if (method === "get_positions") return nativeToScVal({ collateral: {}, liabilities: {}, supply: {} });
     if (method === "get_reserve_list") return nativeToScVal([]);
     throw new Error("unexpected pool");
   }

@@ -604,14 +604,28 @@ async function _buildReserveRow({
   };
 }
 
-async function _resolveUserPositionsInPool(pool, userAddress, run) {
-  const reserveList = await getReserveList(pool.contractId);
-  if (!reserveList || reserveList.length === 0) return null;
+/** Reserve indexes where the wallet supplies, holds collateral or borrows, in order. */
+function _heldReserveIndexes(userPositions) {
+  const indexes = new Set();
+  for (const k of ["collateral", "Collateral", "supply", "Supply", "liabilities", "Liabilities"]) {
+    for (const [i, v] of Object.entries(userPositions[k] || {})) if (BigInt(v || 0n) !== 0n) indexes.add(Number(i));
+  }
+  return [...indexes].sort((a, b) => a - b);
+}
 
+async function _resolveUserPositionsInPool(pool, userAddress, run) {
+  // The wallet's positions first. Most wallets hold nothing in most pools, and
+  // then the pool's reserve list and config aren't needed: one call, not three.
   const userPositions = await getUserPositions(pool.contractId, userAddress);
   if (!userPositions) return null;
+  const held = _heldReserveIndexes(userPositions);
+  if (held.length === 0) return null;
 
-  const poolConfig = await getPoolConfig(pool.contractId);
+  const [reserveList, poolConfig] = await Promise.all([
+    getReserveList(pool.contractId),
+    getPoolConfig(pool.contractId),
+  ]);
+  if (!reserveList || reserveList.length === 0) return null;
 
   // One get_reserve per reserve, shared by the rows and the pending-BLND lookup.
   const reserveReads = new Map();
@@ -619,33 +633,20 @@ async function _resolveUserPositionsInPool(pool, userAddress, run) {
     if (!reserveReads.has(i)) reserveReads.set(i, getReserve(pool.contractId, reserveList[i]));
     return reserveReads.get(i);
   };
-  const holdsAny = reserveList.some((_, i) => {
-    const u = _positionUnits(userPositions, i);
-    return u.supply !== 0n || u.borrow !== 0n;
+  const pendingLookup = _lookupPendingBlnd({
+    pool, userAddress, reserveCount: reserveList.length, userPositions, reserveDataFor, run,
   });
-  const pendingLookup = holdsAny
-    ? _lookupPendingBlnd({ pool, userAddress, reserveCount: reserveList.length, userPositions, reserveDataFor, run })
-    : null;
 
-  const rows = [];
-  for (let i = 0; i < reserveList.length; i++) {
-    const assetAddress = reserveList[i];
-    const collat = (userPositions.collateral || userPositions.Collateral || {})[i] || 0n;
-    const supply = (userPositions.supply || userPositions.Supply || {})[i] || 0n;
-    const liab   = (userPositions.liabilities || userPositions.Liabilities || {})[i] || 0n;
-
-    if (BigInt(collat) === 0n && BigInt(supply) === 0n && BigInt(liab) === 0n) continue;
-
-    // The user HAS a position on this reserve — a failed reserve read here
-    // must fail the pool (throw), not skip the row and undercount.
+  // The rows side by side, in reserve order. The user HAS a position on each
+  // of these reserves: a failed reserve read must fail the pool (throw), not
+  // skip the row and undercount.
+  const rows = (await Promise.all(held.filter((i) => i < reserveList.length).map(async (i) => {
     const reserveData = await reserveDataFor(i);
-    if (!reserveData) continue;
-
-    const row = await _buildReserveRow({
-      pool, reserveIndex: i, assetAddress, reserveData, poolConfig, userPositions, userAddress,
+    if (!reserveData) return null;
+    return _buildReserveRow({
+      pool, reserveIndex: i, assetAddress: reserveList[i], reserveData, poolConfig, userPositions, userAddress,
     });
-    rows.push(row);
-  }
+  }))).filter(Boolean);
 
   if (rows.length === 0) return null;
 
@@ -724,8 +725,8 @@ function _flattenPoolGroup(group) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // How long a load may spend looking for the wallet's other pools. It runs
-// while the built-in pools are read (about 3 s for a big wallet); a long
-// history is finished over the next loads.
+// while the built-in pools are read, and the pools it finds are read as soon
+// as it's done; a long history is finished over the next loads.
 const WALLET_POOLS_BUDGET_MS = 3000;
 
 async function getPositions(userAddress) {
@@ -736,9 +737,12 @@ async function getPositions(userAddress) {
     factoryId: BLEND_POOL_FACTORY,
   });
 
-  const groups = [];
   let failedPools = 0;
+  // One pool at a time: reading them all at once was faster for one wallet,
+  // but with several wallets loading together it put enough calls in flight
+  // for the RPC to answer "busy" more often, and Blend timed out more.
   const readPools = async (list) => {
+    const groups = [];
     for (const pool of list) {
       try {
         const group = await _resolveUserPositionsInPool(pool, userAddress, run);
@@ -749,22 +753,29 @@ async function getPositions(userAddress) {
         console.error(`[Blend] Failed to resolve pool ${pool.contractId}: ${e.message}`);
       }
     }
+    return groups;
   };
 
-  const pools = getConfiguredPools();
-  await readPools(pools);
-
-  // Pools from the wallet's own history that aren't built in. A pool Blend's
-  // factory didn't deploy is read the same way, and its name says so.
-  const known = new Set(pools.map((p) => p.contractId));
-  const found = (await discovery)
-    .filter((p) => !known.has(p.contractId))
-    .map((p) => ({
-      contractId: p.contractId,
-      name: p.factory ? p.name : `${p.name || "Blend pool"} (not deployed by Blend's factory)`,
-    }));
-  await readPools(found);
-  pools.push(...found);
+  // Pools from the wallet's own history that aren't built in, read as soon as
+  // they're known. A pool Blend's factory didn't deploy is read the same way,
+  // and its name says so.
+  const builtIn = getConfiguredPools();
+  const known = new Set(builtIn.map((p) => p.contractId));
+  let found = [];
+  const [builtInGroups, foundGroups] = await Promise.all([
+    readPools(builtIn),
+    discovery.then((list) => {
+      found = list
+        .filter((p) => !known.has(p.contractId))
+        .map((p) => ({
+          contractId: p.contractId,
+          name: p.factory ? p.name : `${p.name || "Blend pool"} (not deployed by Blend's factory)`,
+        }));
+      return readPools(found);
+    }),
+  ]);
+  const groups = [...builtInGroups, ...foundGroups];
+  const pools = [...builtIn, ...found];
   if (pools.length === 0) return [];
 
   // A pool that errored may hold REAL positions. Returning the survivors
