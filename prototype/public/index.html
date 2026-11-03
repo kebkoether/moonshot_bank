@@ -37,7 +37,7 @@
   <title>Stellar Scope (beta)</title>
   <!--
     Stellar Wallets Kit replaces the old freighter-api script. It speaks to
-    Freighter, Albedo, LOBSTR, Hana, Rabet directly via named buttons, and
+    Varial (formerly Freighter), Albedo, LOBSTR, Hana, Rabet directly via named buttons, and
     falls back to its built-in modal for the same set (xBull is currently
     disabled — see the module-level comment for why). The kit is loaded as
     ESM from a self-hosted bundle; the inline page script below stays a classic
@@ -80,7 +80,7 @@
     // or the imports are blocked with no visible error.
     import {
       StellarWalletsKit, Networks,
-      FreighterModule, FREIGHTER_ID,
+      VarialModule, VARIAL_ID,
       LobstrModule, LOBSTR_ID,
       AlbedoModule, ALBEDO_ID,
       HanaModule, HANA_ID,
@@ -90,7 +90,7 @@
     StellarWalletsKit.init({
       network: Networks.PUBLIC,
       modules: [
-        new FreighterModule(),
+        new VarialModule(),
         new AlbedoModule(),
         new LobstrModule(),
         new HanaModule(),
@@ -106,7 +106,7 @@
     window.StellarWalletsKit = StellarWalletsKit;
 
     window.SWK_IDS = {
-      freighter: FREIGHTER_ID,
+      varial: VARIAL_ID,
       albedo: ALBEDO_ID,
       lobstr: LOBSTR_ID,
       hana: HANA_ID,
@@ -3240,9 +3240,9 @@
       <div class="wallet-picker">
         <div class="wallet-picker-label">Or pick a wallet:</div>
         <div class="wallet-picker-row">
-          <button class="wallet-pill" data-action="connect-wallet" data-wallet-id="freighter" data-wallet-label="Freighter" title="Connect Freighter">
-            <img src="https://stellar.creit.tech/wallet-icons/freighter.png" alt="" />
-            Freighter
+          <button class="wallet-pill" data-action="connect-wallet" data-wallet-id="varial" data-wallet-label="Varial" title="Connect Varial (formerly Freighter)">
+            <img src="https://stellar.creit.tech/wallet-icons/varial.png" alt="" />
+            Varial
           </button>
           <button class="wallet-pill" data-action="connect-wallet" data-wallet-id="albedo" data-wallet-label="Albedo" title="Connect Albedo">
             <img src="https://stellar.creit.tech/wallet-icons/albedo.png" alt="" />
@@ -6379,7 +6379,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div style="font-size: 40px; margin-bottom: 16px;">&#x1F4BC;</div>
               <div style="font-size: 16px; margin-bottom: 8px;">No wallets yet</div>
               <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 24px; max-width: 400px; margin-left: auto; margin-right: auto;">
-                Add your Stellar wallets to track your combined portfolio, or connect Freighter to get started.
+                Add your Stellar wallets to track your combined portfolio, or connect Varial (formerly Freighter) to get started.
               </div>
             </div>
             <div class="wallet-add-form">
