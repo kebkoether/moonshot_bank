@@ -36,6 +36,15 @@ const COINGECKO_API = "https://api.coingecko.com/api/v3";
 
 // Hardcoded stablecoin issuers (preserved from server.js for compatibility)
 const STABLECOINS = {
+  // Franklin Templeton's gBENJI and grBENJI: one share each (per Franklin's
+  // stellar.toml) of its Luxembourg public-debt CNAV money market fund, whose
+  // NAV is held at $1.00 and whose income is paid out daily. Neither is on
+  // CoinGecko or has a DEX market.
+  "gBENJI:GD5J73EKK5IYL5XS3FBTHHX7CZIYRP7QXDL57XFWGC2WVYWT326OBXRP": 1.0,
+  "grBENJI:GA3ZBL3LBRKOF7CZ6MCA7JLPHWQCGYCCGKH4GVWNEDZOXW4IPXFGN2FQ": 1.0,
+  // WisdomTree's Dollar Token (WisdomTree Prime). Its stellar.toml anchors it
+  // to USD; not on CoinGecko, and no DEX market.
+  "USD:GC2ATEL4K2O5BJO7Z76MYSV6TKHCROKV5GXEOU7NO2TUEOOMFDDIPWID": 1.0,
   "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN": 1.0,
   "USDC:GDQOE23CFSUMSVQK4Y5JHPPYK73VYCNHZHA7ENKCV37P6SUEO6XQBKPP": 1.0,
   "yUSDC:GDGTVWSM4MGS4T7Z6W4RPWOCHE2I6RDFCIFZGS3DOA63LWQTRNZNTTFF": 1.0,

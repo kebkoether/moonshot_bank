@@ -274,6 +274,72 @@
               "url": "https://aqua.network/swap/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/USDM1:GDM5QWWXCMDTQMZAKMYTCI52LA7FWBHAZMU5NJLMIFHDJISJRP2ZWPKC/"
             }
           ]
+        },
+        {
+          "code": "gBENJI",
+          "issuer": "GD5J73EKK5IYL5XS3FBTHHX7CZIYRP7QXDL57XFWGC2WVYWT326OBXRP",
+          "issuerName": "Franklin Templeton",
+          "issuerUrl": "https://www.franklintempleton.com/",
+          "description": "Tokenized shares of the Franklin OnChain U.S. Government Liquidity Fund (called the Franklin OnChain U.S. Government Money Fund until June 2026), a Luxembourg money market fund that holds its NAV at $1.00 and pays its income out daily. Each gBENJI token is one share of the fund's IB (Ddis) USD class (ISIN LU2900381208).",
+          "notes": "Luxembourg CNAV money market fund · $1.00 NAV · transfer-restricted (no DEX trading)",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "Luxembourg SICAV authorised by the CSSF as a short-term public debt CNAV money market fund under the EU Money Market Fund Regulation",
+            "reserves": "U.S. government debt, reverse repos backed by it, and cash (a public debt CNAV fund must hold at least 99.5% in these)",
+            "attestation": "Franklin Templeton's fund factsheet reports the NAV ($1.00) and fund size",
+            "custody": "",
+            "redemption": "Subscribe and redeem through Franklin Templeton's gBENJI institutional website (per Franklin's stellar.toml)",
+            "transfers": "Issuer authorization required for every holder; Franklin Templeton can freeze and claw back",
+            "audit": "",
+            "stellarSince": "2025-02"
+          }
+        },
+        {
+          "code": "grBENJI",
+          "issuer": "GA3ZBL3LBRKOF7CZ6MCA7JLPHWQCGYCCGKH4GVWNEDZOXW4IPXFGN2FQ",
+          "issuerName": "Franklin Templeton",
+          "issuerUrl": "https://www.franklintempleton.com/",
+          "description": "Tokenized shares of the AB (Ddis) USD class (ISIN LU3258450587) of the same Luxembourg money market fund as gBENJI, the Franklin OnChain U.S. Government Liquidity Fund. The fund holds its NAV at $1.00 and pays its income out daily; each grBENJI token is one share.",
+          "notes": "Luxembourg CNAV money market fund (AB share class) · $1.00 NAV · transfer-restricted",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "Luxembourg SICAV authorised by the CSSF as a short-term public debt CNAV money market fund under the EU Money Market Fund Regulation",
+            "reserves": "U.S. government debt, reverse repos backed by it, and cash (a public debt CNAV fund must hold at least 99.5% in these)",
+            "attestation": "Franklin Templeton's fund factsheet reports the NAV ($1.00) and fund size",
+            "custody": "",
+            "redemption": "Subscribe and redeem through Franklin Templeton's grBENJI institutional website (per Franklin's stellar.toml)",
+            "transfers": "Issuer authorization required for every holder; Franklin Templeton can freeze and claw back",
+            "audit": "",
+            "stellarSince": "2026-02"
+          }
+        },
+        {
+          "code": "WTGX",
+          "issuer": "GDMBNMFJ3TRFLASJ6UGETFME3PJPNKPU24C7KFDBEBPQFG2CI6UC3JG6",
+          "issuerName": "WisdomTree",
+          "issuerUrl": "https://www.wisdomtree.com/investments/digital-funds/money-market/wtgxx",
+          "description": "Tokenized shares of the WisdomTree Treasury Money Market Digital Fund (WTGXX; called the WisdomTree Government Money Market Digital Fund until November 2025), an SEC-registered money market fund that aims to keep a stable $1.00 NAV. The fund's transfer agent keeps the official share register; the Stellar token is its on-chain record, and WisdomTree issues the same fund on Ethereum, Base, Arbitrum, Avalanche, Optimism, Plume and Solana.",
+          "notes": "U.S. Treasury money market fund · stable $1.00 NAV · permissioned wallets",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "SEC-registered money market fund (WisdomTree Digital Trust, Investment Company Act of 1940)",
+            "reserves": "U.S. Treasury bills and floating-rate notes, and tri-party repos (fact sheet, 30 Sep 2026)",
+            "attestation": "Holdings and yields in WisdomTree's quarterly fact sheet; annual and semi-annual reports filed with the SEC",
+            "custody": "",
+            "redemption": "Through a WisdomTree Prime account (per WisdomTree's stellar.toml)",
+            "transfers": "Peer-to-peer only between eligible, permissioned wallets; issuer authorization required, with freeze and clawback",
+            "audit": "",
+            "stellarSince": "2023-11"
+          },
+          "venues": [
+            {
+              "name": "WisdomTree Prime",
+              "url": "https://www.wisdomtreeprime.com"
+            }
+          ]
         }
       ]
     },
@@ -681,6 +747,32 @@
               "url": "https://app.soroswap.finance/swap"
             }
           ]
+        },
+        {
+          "code": "GOLD",
+          "issuer": "GCK75CK3VX5L4ZLSD7HHNVA4L3LKGIAYWLCZO2IBNGOFTBV3HJBE2MPJ",
+          "issuerName": "WisdomTree",
+          "issuerUrl": "https://www.wisdomtreeprime.com",
+          "description": "The WisdomTree Gold Token: each token is a document of title to one troy ounce of an LBMA gold bar, held by HSBC in its London vaults in segregated, serial-numbered bars. Bought, held and sold in the WisdomTree Prime app.",
+          "notes": "1 token = 1 troy oz of LBMA gold (HSBC, London) · permissioned",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "WisdomTree Digital Trust Company, LLC: a New York limited-purpose trust company, chartered by NYDFS in March 2024 to issue the WisdomTree Dollar and Gold tokens",
+            "reserves": "One troy ounce of LBMA Good Delivery gold per token, in segregated, serial-numbered bars",
+            "attestation": "Reserve attestations published at wisdomtreeprime.com/attestations",
+            "custody": "HSBC Bank plc, London vaults",
+            "redemption": "Through a WisdomTree Prime account (per WisdomTree's stellar.toml)",
+            "transfers": "Issuer authorization required; WisdomTree can freeze and claw back",
+            "audit": "",
+            "stellarSince": "2022-09"
+          },
+          "venues": [
+            {
+              "name": "WisdomTree Prime",
+              "url": "https://www.wisdomtreeprime.com"
+            }
+          ]
         }
       ]
     },
@@ -931,6 +1023,32 @@
             {
               "name": "SushiSwap V3 (Stellar)",
               "url": "https://www.sushi.com/stellar/swap"
+            }
+          ]
+        },
+        {
+          "code": "USD",
+          "issuer": "GC2ATEL4K2O5BJO7Z76MYSV6TKHCROKV5GXEOU7NO2TUEOOMFDDIPWID",
+          "issuerName": "WisdomTree",
+          "issuerUrl": "https://www.wisdomtreeprime.com",
+          "description": "The WisdomTree Dollar Token, the U.S. dollar token inside the WisdomTree Prime app. WisdomTree's stellar.toml anchors it 1:1 to U.S. dollars and links its reserve attestations.",
+          "notes": "WisdomTree Dollar Token · USD-backed · permissioned",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "WisdomTree Digital Trust Company, LLC: a New York limited-purpose trust company, chartered by NYDFS in March 2024 to issue the WisdomTree Dollar and Gold tokens",
+            "reserves": "U.S. dollar reserves kept under a DFS-approved framework (WisdomTree's 2024 charter announcement)",
+            "attestation": "Reserve attestations published at wisdomtreeprime.com/attestations",
+            "custody": "",
+            "redemption": "Redeem for U.S. dollars in the WisdomTree Prime app (per WisdomTree's stellar.toml)",
+            "transfers": "Issuer authorization required; WisdomTree can freeze and claw back",
+            "audit": "",
+            "stellarSince": "2022-09"
+          },
+          "venues": [
+            {
+              "name": "WisdomTree Prime",
+              "url": "https://www.wisdomtreeprime.com"
             }
           ]
         }
