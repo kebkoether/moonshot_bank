@@ -105,6 +105,13 @@ test("Ultra Capital's yUSDC is on the stablecoin list", async () => {
   assert.equal(p.usd, 1);
 });
 
+test("Figure's YLDS is $1 (its issuer anchors it to USD); YLDS from a look-alike issuer isn't", async () => {
+  const p = await pricing.priceClassicAsset(noMarket, "YLDS", "GAC7MOPTQLQUM3KC24AW4GHS3RLF72LPEZO54AH7EZ6TSMGRB5SOAVH3");
+  assert.deepEqual(p, { usd: 1, change24h: 0, source: "stablecoin", confidence: "high" });
+  // A real look-alike on mainnet: 900M "YLDS", one holder, home domain xlmcoins.club.
+  assert.equal(await pricing.priceClassicAsset(noMarket, "YLDS", "GBA2ZKISUQKBZ7FEIDI3VVPI2SXVMO4MJD77IQMRA7ZYTPTLZVJFY7R5"), null);
+});
+
 test("a token CoinGecko lists only in its refresh is matched on the full issuer", async () => {
   const real = Keypair.random().publicKey();
   coinsList = [{ id: "test-coin", symbol: "tst", platforms: { stellar: `TSTX-${real}` } }];
@@ -120,7 +127,7 @@ test("every full issuer in the hardcoded price lists is a valid Stellar address"
   const issuers = Object.keys(pricing.STABLECOINS).map((k) => k.split(":")[1]);
   const seedSource = fs.readFileSync(path.join(__dirname, "../lib/token-price-map.js"), "utf8");
   for (const m of seedSource.matchAll(/issuer: "(G[A-Z2-7]{55})"/g)) issuers.push(m[1]);
-  assert.ok(issuers.length >= 8, `found ${issuers.length}`); // 3 stablecoins + 5 full seed issuers today
+  assert.ok(issuers.length >= 9, `found ${issuers.length}`); // 4 stablecoins + 5 full seed issuers today
   const invalid = issuers.filter((i) => !StrKey.isValidEd25519PublicKey(i));
   assert.deepEqual(invalid, []);
 });

@@ -39,6 +39,11 @@ const STABLECOINS = {
   "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN": 1.0,
   "USDC:GDQOE23CFSUMSVQK4Y5JHPPYK73VYCNHZHA7ENKCV37P6SUEO6XQBKPP": 1.0,
   "yUSDC:GDGTVWSM4MGS4T7Z6W4RPWOCHE2I6RDFCIFZGS3DOA63LWQTRNZNTTFF": 1.0,
+  // Figure's YLDS. Its issuer's stellar.toml (ylds.com) anchors it to USD and
+  // redeems it for USD; the yield is paid as more YLDS, not in the price. With
+  // no CoinGecko listing and no DEX market it had no price, so a wallet
+  // holding 25.3M YLDS showed as $16.86.
+  "YLDS:GAC7MOPTQLQUM3KC24AW4GHS3RLF72LPEZO54AH7EZ6TSMGRB5SOAVH3": 1.0,
 };
 
 // ── Cache ────────────────────────────────────────────────────────────────────
