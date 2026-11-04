@@ -136,7 +136,7 @@
     for (const p of w.defiPositions || []) rows.push(...positionRows(p));
     for (const g of w.defiByPool || []) {
       if (g.protocol && g.protocol !== "blend") continue;
-      if (g.totalPendingBlnd > 0) rows.push(rewardRow("Blend", g.poolName, "BLND", g.totalPendingBlnd, null, null));
+      if (g.totalPendingBlnd > 0) rows.push(rewardRow("Blend", g.poolName, "BLND", g.totalPendingBlnd, null, g.totalPendingBlndUSD));
     }
     return rows;
   }
