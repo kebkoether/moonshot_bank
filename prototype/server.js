@@ -254,62 +254,15 @@ async function collectDefiPositions(address, xlmPrice) {
 
 // ── Price Engine ──────────────────────────────────────────────────────────────
 
-const priceCache = new Map();
-const PRICE_TTL = 60_000; // 60 seconds
-
 // XLM/USD lives in lib/xlm-price.js: Stellar's own DEX first, then CoinGecko.
 // (It used to come from the Freighter backend, whose feed went stale.)
 const { getXLMPrice } = require("./lib/xlm-price");
 
-async function getAssetPriceViaSDEX(assetCode, assetIssuer) {
-  const cacheKey = `${assetCode}:${assetIssuer}`;
-  const cached = priceCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < PRICE_TTL) return cached.price;
-
-  try {
-    const asset = new StellarSdk.Asset(assetCode, assetIssuer);
-    const xlmAsset = StellarSdk.Asset.native();
-
-    // Get orderbook: asset vs XLM
-    const orderbook = await horizon.orderbook(asset, xlmAsset).call();
-
-    if (orderbook.bids.length === 0 && orderbook.asks.length === 0) {
-      return null; // No market
-    }
-
-    let priceInXLM = null;
-
-    if (orderbook.bids.length > 0 && orderbook.asks.length > 0) {
-      const bestBid = parseFloat(orderbook.bids[0].price);
-      const bestAsk = parseFloat(orderbook.asks[0].price);
-      const spread = (bestAsk - bestBid) / bestBid;
-
-      if (spread < 0.1) {
-        // Use mid-price if spread < 10%
-        priceInXLM = (bestBid + bestAsk) / 2;
-      } else {
-        priceInXLM = bestBid; // Conservative: use bid
-      }
-    } else if (orderbook.bids.length > 0) {
-      priceInXLM = parseFloat(orderbook.bids[0].price);
-    } else {
-      // Asks only: nobody is bidding. A lone seller's wishful ask is not a
-      // market price, and valuing a holding off it can inflate a wallet by
-      // orders of magnitude. Leave unpriced — later layers may still price.
-      return null;
-    }
-
-    const xlmPrice = await getXLMPrice();
-    const priceUSD = priceInXLM * xlmPrice.usd;
-
-    const price = { usd: priceUSD, xlm: priceInXLM, change24h: 0 };
-    priceCache.set(cacheKey, { price, ts: Date.now() });
-    return price;
-  } catch (e) {
-    console.error(`Failed to price ${assetCode}:`, e.message);
-    return null;
-  }
-}
+// A classic asset's price from Stellar's order books (the pricing engine's
+// "sdex" layer): its XLM book, or its USDC book when the XLM book has no
+// usable mid price. See lib/sdex-price.js.
+const { createSdexPricer } = require("./lib/sdex-price");
+const getAssetPriceViaSDEX = createSdexPricer({ horizon, getXLMPrice });
 
 // ── Known stablecoins (shortcut pricing) ─────────────────────────────────────
 
