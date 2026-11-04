@@ -21,10 +21,19 @@ const server = new rpc.Server(SOROBAN_RPC_URL);
 const RPC_RETRY_ATTEMPTS = parseInt(process.env.RPC_RETRY_ATTEMPTS || "4", 10);
 const RPC_RETRY_BASE_MS = parseInt(process.env.RPC_RETRY_BASE_MS || "250", 10);
 
+// The RPC runs simulations on a few workers with a short queue in front
+// (PREFLIGHT_WORKER_QUEUE_SIZE, the CPU count by default). When more are
+// waiting, it answers "preflight queue full". That comes back as a
+// simulation error, not an HTTP error, so it read as the contract's own
+// answer: Blend, K2 and Upshift dropped out of a portfolio as "unavailable",
+// Upshift valued its shares 1:1, and token balances read as 0. It means
+// "busy, ask again".
+const RPC_BUSY_RE = /preflight queue full/i;
+
 function isTransientRpcError(e) {
   const msg = String(e?.message || "");
   const status = e?.response?.status ?? e?.status;
-  return status === 429 || (status >= 500 && status < 600)
+  return status === 429 || (status >= 500 && status < 600) || RPC_BUSY_RE.test(msg)
     || /429|rate limit|too many requests|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network error|timeout/i.test(msg);
 }
 
@@ -62,7 +71,12 @@ async function simulateContractCall(contractId, method, args = []) {
     .setTimeout(30)
     .build();
 
-  const simResult = await withRpcRetry(() => server.simulateTransaction(tx), `${method}@${contractId.slice(0, 8)}`);
+  const simResult = await withRpcRetry(async () => {
+    const r = await server.simulateTransaction(tx);
+    // Busy, not an answer: throw so it's retried like a 429.
+    if (rpc.Api.isSimulationError(r) && RPC_BUSY_RE.test(r.error)) throw new Error(`Simulation failed: ${r.error}`);
+    return r;
+  }, `${method}@${contractId.slice(0, 8)}`);
 
   if (rpc.Api.isSimulationError(simResult)) {
     throw new Error(`Simulation failed: ${simResult.error}`);
