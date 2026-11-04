@@ -1091,6 +1091,11 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
     const yieldsFile = JSON.parse(fs.readFileSync(RWA_YIELDS_PATH, "utf8"));
     const curated = yieldsFile.stats || {};
     const xlmPrice = await getXLMPrice();
+    // The classic assets below are priced one at a time; without one batched
+    // CoinGecko call first, each asks CoinGecko on its own, and the burst is
+    // rate-limited (BENJI, WTGX and the WisdomTree Gold Token came back
+    // unpriced, so with no market cap).
+    await pricingEngine.primeKnownPrices();
 
     const stats = {};
     for (const cat of (catalog.categories || [])) {

@@ -124,6 +124,21 @@ function _seedFromList(list) {
 
 _seedFromList(SEED);
 
+// Classic assets CoinGecko doesn't list that are each a claim on exactly one
+// unit of a coin it does list, so they take that coin's price. Matched on the
+// full issuer only (no code-only fallback): anyone can issue a "GOLD".
+const PRICED_AS = [
+  // WisdomTree Gold Token: each token is one troy ounce of LBMA gold held by
+  // HSBC in London (WisdomTree's token overview), as each PAX Gold is one
+  // troy ounce. PAXG trades at spot gold; the RWA tab prices XAUM off it too.
+  { coingeckoId: "pax-gold", code: "GOLD", issuer: "GCK75CK3VX5L4ZLSD7HHNVA4L3LKGIAYWLCZO2IBNGOFTBV3HJBE2MPJ" },
+];
+for (const { coingeckoId, code, issuer } of PRICED_AS) {
+  const key = `${code}:${issuer.slice(0, 12)}`;
+  classicMap.set(key, coingeckoId);
+  _noteIssuer(key, issuer);
+}
+
 let lastRefreshTs = 0;
 let refreshInFlight = null;
 
