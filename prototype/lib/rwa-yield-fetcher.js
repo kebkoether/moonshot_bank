@@ -104,7 +104,22 @@ const CENTRIFUGE_TOKENS = {
     { slug: "jtrsy-cbhoek",   stellarContractId: "CBHOEKLWTB6HR2A3IXHIIMQG5FOXWXS6EG4Q5YJDRPMXPCX7M24CYR2O", decimals: 18 },
     { slug: "dejtrsy-cbi7uc", stellarContractId: "CBI7UCH5KGSVQRO5H4SUCZUTZABCITZLRHQQZTWL2TK4RZ72TAR6IHRV", decimals: 18 },
   ],
+  // deHYB is HYB's 1:1 permissionless wrapper, so it takes HYB's NAV and
+  // yield, as deJAAA takes JAAA's. (Centrifuge also lists deHYB as a token of
+  // its own, but its snapshots have included a $0.000007 price.)
+  HYB: [
+    { slug: "hyb-cbnt35",   stellarContractId: "CBNT35PZXQBXKCNKPA6AL6TXHANGLAZMPE35TJUPI2BCO7OGHVKW3WYA", decimals: 18 },
+    { slug: "dehyb-ccrth4", stellarContractId: "CCRTH4IJKVIBU6VQLRHFKDQYWXBEBJJXKDFNWVETLKUJJ7U62HBAZOIH", decimals: 18 },
+  ],
+  JQQQ: [
+    { slug: "jqqq-caqypr", stellarContractId: "CAQYPRTX2E6H6BM57QRBYZWP667FPDYDUHMOQXGXM2HA64KO6AISRFEK", decimals: 18 },
+  ],
 };
+
+// Funds whose NAV follows a market index rather than accruing a yield. For
+// JQQQ (the Nasdaq-100) Centrifuge's annualized 7-day "yield" read -314% on
+// 2026-11-04: that's the index's move, not a yield. Market cap only.
+const CENTRIFUGE_NO_YIELD = new Set(["JQQQ"]);
 
 async function fetchCentrifuge() {
   const query = `{
@@ -126,7 +141,9 @@ async function fetchCentrifuge() {
     try {
       pricePerShare = Number(BigInt(snap.tokenPrice)) / CENTRIFUGE_PRICE_SCALE;
     } catch { /* leave null */ }
-    const yieldEntry = formatCentrifugeYield(snap);
+    const yieldEntry = CENTRIFUGE_NO_YIELD.has(t.symbol) ? null : formatCentrifugeYield(snap);
+    const snapTs = parseInt(snap.timestamp, 10);
+    const snapAsOf = Number.isFinite(snapTs) ? new Date(snapTs).toISOString().slice(0, 10) : todayISO();
 
     // Query on-chain supply for each Stellar wrapper independently.
     await Promise.all(wrappers.map(async ({ slug, stellarContractId, decimals }) => {
@@ -137,6 +154,7 @@ async function fetchCentrifuge() {
         entry.tvl = formatBigUSD(usd);
         entry.supplyTokens = supply;
         entry.tvlSource = "Centrifuge (Stellar supply × fund NAV)";
+        if (!entry.asOf) entry.asOf = snapAsOf;
       }
       if (Object.keys(entry).length > 0) out[slug] = entry;
     }));
@@ -571,7 +589,7 @@ async function fetchUsdm1() {
 // ── Refresh orchestration ───────────────────────────────────────────────────
 
 const REFRESHERS = [
-  { name: "centrifuge", fn: fetchCentrifuge },       // JAAA, deJAAA, JTRSY, deJTRSY (yield + tvl)
+  { name: "centrifuge", fn: fetchCentrifuge },       // JAAA, deJAAA, JTRSY, deJTRSY, HYB, deHYB (yield + tvl); JQQQ (tvl)
   { name: "spiko",      fn: fetchSpiko },            // USTBL, EUTBL, UKTBL, SAFO (yield + tvl)
   { name: "etherfuse",  fn: fetchEtherfuse },        // USTRY, CETES, TESOURO (yield + tvl)
   { name: "ondo",       fn: fetchOndo },             // USDY (yield only)
@@ -653,5 +671,5 @@ function getStatus() {
 module.exports = {
   start, stop, refreshAll, getFreshYield, getStatus,
   // exported for tests
-  parseLatestRateCsv, usdm1RateFromBenchmark,
+  parseLatestRateCsv, usdm1RateFromBenchmark, fetchCentrifuge, CENTRIFUGE_TOKENS,
 };

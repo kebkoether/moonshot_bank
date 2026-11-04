@@ -556,6 +556,98 @@
       ]
     },
     {
+      "id": "corporate-bonds",
+      "name": "Corporate Bonds",
+      "description": "Tokenized corporate bond funds.",
+      "assets": [
+        {
+          "code": "HYB",
+          "contractId": "CBNT35PZXQBXKCNKPA6AL6TXHANGLAZMPE35TJUPI2BCO7OGHVKW3WYA",
+          "issuerName": "Centrifuge / Anemoy (New York Life Investments)",
+          "issuerUrl": "https://centrifuge.io",
+          "description": "Tokenized shares of the NYLIM US High Yield Bond Fund (Anemoy U.S. High Yield Corporate Bond Segregated Portfolio), an actively managed portfolio of U.S. high-yield corporate bonds sub-advised by New York Life Investment Management. USDC subscriptions and redemptions. Allowlist-gated transfers — see deHYB for the DeFi-wrapped variant.",
+          "notes": "U.S. high-yield corporate bond fund (Soroban, allowlist)",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "BVI segregated portfolio offered under Regulation S; Anemoy as issuer and manager; New York Life Investment Management as sub-advisor",
+            "reserves": "Actively managed U.S. high-yield corporate bonds",
+            "attestation": "On-chain NAV via Centrifuge indexer",
+            "custody": "Anemoy fund structure; shares represented on-chain via Centrifuge",
+            "redemption": "USDC subscriptions/redemptions for eligible investors",
+            "transfers": "Allowlist required (non-U.S. professional investors); deHYB is the permissionless wrapper",
+            "audit": "Centrifuge protocol audits by leading firms (see centrifuge.io/security)",
+            "stellarSince": "2026"
+          },
+          "venues": [
+            {
+              "name": "Centrifuge App",
+              "url": "https://app.centrifuge.io"
+            }
+          ]
+        },
+        {
+          "code": "deHYB",
+          "contractId": "CCRTH4IJKVIBU6VQLRHFKDQYWXBEBJJXKDFNWVETLKUJJ7U62HBAZOIH",
+          "issuerName": "Open Market Foundation / Centrifuge",
+          "issuerUrl": "https://centrifuge.io",
+          "description": "DeFi-wrapped, permissionless version of HYB. Same U.S. high-yield corporate bond exposure but transferable in DeFi protocols without a per-holder allowlist.",
+          "notes": "deHYB — DeFi-wrapped HYB",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "BVI segregated portfolio (underlying HYB); Open Market Foundation issues the permissionless wrapper",
+            "reserves": "U.S. high-yield corporate bonds (mirrors HYB — same fund; deHYB is a 1:1 wrapper)",
+            "attestation": "On-chain NAV via Centrifuge indexer",
+            "custody": "Anemoy fund structure; deHYB represents 1:1 wrapped HYB shares",
+            "redemption": "Unwrap to HYB (allowlisted) then via Centrifuge",
+            "transfers": "Open (permissionless — no allowlist)",
+            "audit": "Centrifuge protocol audits + Open Market Foundation wrapper contract",
+            "stellarSince": "2026"
+          },
+          "venues": [
+            {
+              "name": "Centrifuge App",
+              "url": "https://app.centrifuge.io"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tokenized-equities",
+      "name": "Tokenized Equity Funds",
+      "description": "Tokenized funds that track stock indexes.",
+      "assets": [
+        {
+          "code": "JQQQ",
+          "contractId": "CAQYPRTX2E6H6BM57QRBYZWP667FPDYDUHMOQXGXM2HA64KO6AISRFEK",
+          "issuerName": "Centrifuge / Janus Henderson",
+          "issuerUrl": "https://centrifuge.io",
+          "description": "Tokenized shares of the Janus Henderson Nasdaq-100 Index Fund, a segregated portfolio of a BVI investment company that tracks the Nasdaq-100 under a license from Nasdaq. Indirect index exposure, not ownership of the underlying stocks. Returns come from the index, so no yield is shown.",
+          "notes": "Nasdaq-100 index fund (Soroban, eligible investors)",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "Segregated portfolio of a BVI investment company; managed by Janus Henderson; Nasdaq-100 tracked under license from Nasdaq",
+            "reserves": "Indirect exposure to the Nasdaq-100 index (not direct ownership of the 100 stocks)",
+            "attestation": "On-chain NAV via Centrifuge indexer",
+            "custody": "",
+            "redemption": "",
+            "transfers": "Eligible professional investors outside the U.S. only; $100,000 minimum (as reported at launch)",
+            "audit": "Centrifuge protocol audits by leading firms (see centrifuge.io/security)",
+            "stellarSince": "2026"
+          },
+          "venues": [
+            {
+              "name": "Centrifuge App",
+              "url": "https://app.centrifuge.io"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "tokenized-gold",
       "name": "Tokenized Gold",
       "description": "Tokens backed by physical gold.",
