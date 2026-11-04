@@ -24,7 +24,10 @@
 // CSP keeps style-src 'unsafe-inline'.
 
 export { StellarWalletsKit, Networks } from "@creit.tech/stellar-wallets-kit";
-export { FreighterModule, FREIGHTER_ID } from "@creit.tech/stellar-wallets-kit/modules/freighter";
+// Freighter is now Varial (kit 2.8.0): same extension and API, new name and
+// wallet id ("varial"). The old FreighterModule / FREIGHTER_ID names are
+// deprecated aliases of these.
+export { VarialModule, VARIAL_ID } from "@creit.tech/stellar-wallets-kit/modules/varial";
 export { LobstrModule, LOBSTR_ID } from "@creit.tech/stellar-wallets-kit/modules/lobstr";
 export { AlbedoModule, ALBEDO_ID } from "@creit.tech/stellar-wallets-kit/modules/albedo";
 export { HanaModule, HANA_ID } from "@creit.tech/stellar-wallets-kit/modules/hana";

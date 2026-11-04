@@ -158,7 +158,7 @@ test("the vendored bundle contains the modal UI, not just the SDK", () => {
   for (const marker of ["What is a wallet", "AUTH_OPTIONS", "swk-background"]) {
     assert.ok(bundle.includes(marker), `bundle is missing the modal UI (no "${marker}")`);
   }
-  for (const name of ["StellarWalletsKit", "FREIGHTER_ID", "LOBSTR_ID", "ALBEDO_ID", "HANA_ID", "RABET_ID"]) {
+  for (const name of ["StellarWalletsKit", "VARIAL_ID", "LOBSTR_ID", "ALBEDO_ID", "HANA_ID", "RABET_ID"]) {
     assert.ok(bundle.includes(name), `bundle is missing export ${name}`);
   }
 });
