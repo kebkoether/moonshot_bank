@@ -28,6 +28,7 @@ const { resolveNfts } = require("./lib/nft-resolver");
 const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
 const { getTickerPrices } = require("./lib/price-ticker");
 const { cleanLabel } = require("./lib/sanitize");
+const { classicSupply } = require("./lib/horizon-supply");
 
 const app = express();
 // Railway/Cloudflare terminate TLS one hop in front of us. Without this,
@@ -1028,12 +1029,9 @@ async function fetchClassicMarketCap(code, issuer, xlmPrice) {
     const data = await res.json();
     const records = data?._embedded?.records || [];
     if (records.length === 0) return null;
-    // Horizon dropped the flat `amount` field — current responses report
-    // supply as balances.authorized. Keep `amount` as a fallback for older
-    // Horizon deployments.
-    const supply = parseFloat(
-      records[0].balances?.authorized ?? records[0].amount ?? "0"
-    );
+    // Every unit issued, wherever it sits: trustlines (authorized or not),
+    // claimable balances, AMM pools and Soroban contracts.
+    const supply = classicSupply(records[0]);
     if (!Number.isFinite(supply) || supply <= 0) return null;
     const price = await pricingEngine.priceClassicAsset(
       { priceViaSDEX: getAssetPriceViaSDEX },
