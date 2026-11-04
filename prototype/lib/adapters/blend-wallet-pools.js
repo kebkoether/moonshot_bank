@@ -50,15 +50,41 @@ function _calledContract(op) {
   }
 }
 
+const OUT_OF_TIME = Symbol("out of time");
+
+/**
+ * `promise`'s result, or OUT_OF_TIME once the deadline passes, whichever comes
+ * first. The promise itself carries on; nothing waits for it any more.
+ */
+function _byDeadline(promise, deadline) {
+  let timer;
+  const late = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(OUT_OF_TIME), Math.max(0, deadline - Date.now()));
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
 async function _page(address, order, cursor, deadline) {
   const ms = deadline - Date.now();
   if (ms <= 0) return null;
   const q = `order=${order}&limit=${PAGE}${cursor ? `&cursor=${cursor}` : ""}`;
   try {
-    const res = await _deps.fetch(`${HORIZON}/accounts/${address}/operations?${q}`, { signal: AbortSignal.timeout(ms) });
+    const request = _deps.fetch(`${HORIZON}/accounts/${address}/operations?${q}`, { signal: AbortSignal.timeout(ms) });
+    request.catch(() => {}); // settled late, after the race below: nobody is listening
+    const res = await _byDeadline(request, deadline);
+    if (res === OUT_OF_TIME) return null;
     if (res.status === 404) return []; // no such account yet: no history
     if (!res.ok) throw new Error(`Horizon ${res.status}`);
-    return (await res.json())?._embedded?.records || [];
+    // The body is read against the deadline too. If the abort signal fires
+    // while a gzip body (as Horizon sends) is still arriving, Node's fetch
+    // can leave res.json() pending for good. On 2026-11-04 that held up the
+    // whole Blend read, which timed out at 8 s and showed Blend as
+    // unavailable: 5 times in 4 cold loads of six wallets.
+    const body = res.json();
+    body.catch(() => {});
+    const data = await _byDeadline(body, deadline);
+    if (data === OUT_OF_TIME) return null;
+    return data?._embedded?.records || [];
   } catch (e) {
     // Out of time for this load (while waiting or reading the body): carry on next time.
     if (e?.name === "TimeoutError" || e?.name === "AbortError") return null;
@@ -113,8 +139,9 @@ async function _classify(contractId, factoryId) {
 
 /**
  * Blend v2 pools this wallet has called, as { contractId, name, factory }.
- * Never throws: on a Horizon or RPC failure it returns what it has found so
- * far, and tries the rest on the next call.
+ * Never throws, and answers by the deadline: on a Horizon or RPC failure, or
+ * when time runs out, it returns what it has found so far, and tries the rest
+ * on the next call.
  */
 async function walletBlendPools(address, { deadline, factoryId }) {
   if (!address || !address.startsWith("G")) return [];
@@ -132,12 +159,16 @@ async function walletBlendPools(address, { deadline, factoryId }) {
   const worker = async () => {
     while (next < todo.length && Date.now() < deadline) {
       const c = todo[next++];
-      try {
-        _contracts.set(c, await _classify(c, factoryId));
-      } catch (e) {
-        // Not cached: asked again next time.
-        if (!isTransientRpcError(e)) console.warn(`[Blend] couldn't check ${c.slice(0, 8)}: ${String(e?.message || e).slice(0, 120)}`);
-      }
+      const check = _classify(c, factoryId).then(
+        (result) => { _contracts.set(c, result); },
+        (e) => {
+          // Not cached: asked again next time.
+          if (!isTransientRpcError(e)) console.warn(`[Blend] couldn't check ${c.slice(0, 8)}: ${String(e?.message || e).slice(0, 120)}`);
+        },
+      );
+      // Not past the deadline: a check still running finishes in the
+      // background, and its answer is used from the next load on.
+      await _byDeadline(check, deadline);
     }
   };
   await Promise.all(Array.from({ length: Math.min(CLASSIFY_CONCURRENCY, todo.length) }, worker));
