@@ -29,6 +29,7 @@ const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
 const { getTickerPrices } = require("./lib/price-ticker");
 const { cleanLabel } = require("./lib/sanitize");
 const { classicSupply } = require("./lib/horizon-supply");
+const historyExport = require("./lib/history-export");
 
 const app = express();
 // Railway/Cloudflare terminate TLS one hop in front of us. Without this,
@@ -553,6 +554,50 @@ app.get("/api/v1/account/:address/history", async (req, res) => {
   } catch (e) {
     console.error("History fetch error:", e.message);
     res.status(500).json({ error: "Failed to fetch transaction history" });
+  }
+});
+
+// The wallet's whole history, one row per balance change
+// (lib/history-export.js): as far back as Horizon keeps it, up to 10,000 rows.
+// The page builds the CSV file (public/history-csv.js), for one wallet or
+// all the saved ones. Up to a few hundred Horizon requests per wallet, so
+// only from the site's own pages.
+app.get("/api/v1/account/:address/history/export", sameOriginOnly, async (req, res) => {
+  const { address } = req.params;
+  if (!StellarSdk.StrKey.isValidEd25519PublicKey(address)) {
+    return res.status(400).json({ error: "Not a Stellar account address (G…)." });
+  }
+  const h = getHorizon();
+  const page = (kind, cursor) => {
+    let q = (kind === "effects" ? h.effects() : kind === "operations" ? h.operations() : h.transactions())
+      .forAccount(address).order("desc").limit(historyExport.PAGE_SIZE);
+    if (kind === "transactions") q = q.includeFailed(true);
+    if (cursor) q = q.cursor(cursor);
+    return q.call().then((r) => r.records);
+  };
+  try {
+    const r = await historyExport.exportHistory(address, { page });
+    if (r.notFound) return res.status(404).json({ error: "Horizon has no history for this account." });
+    if (!r.rows.length && !r.complete) {
+      return res.status(502).json({ error: "Couldn't read the history from Horizon. Try again in a minute." });
+    }
+    res.set("Cache-Control", "no-store");
+    res.json({
+      address,
+      complete: r.complete,
+      limit: r.limit,
+      from: r.from,
+      to: r.to,
+      startsAtCreation: r.startsAtCreation,
+      missingOperations: r.missingOperations,
+      // Arrays in the order of `columns`: a third the size of objects.
+      columns: historyExport.COLUMNS,
+      rows: historyExport.asArrays(r.rows),
+    });
+  } catch (e) {
+    if (e.busy) return res.status(429).json({ error: e.message });
+    console.error("History export error:", e.message);
+    res.status(502).json({ error: "Couldn't read the history from Horizon. Try again in a minute." });
   }
 });
 

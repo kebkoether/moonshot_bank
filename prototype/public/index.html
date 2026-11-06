@@ -1614,6 +1614,9 @@
 
     /* ── Transaction History ────────────────────────────────── */
     .tx-list { display: flex; flex-direction: column; gap: 2px; }
+    .history-export { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .history-export-status { color: var(--text-secondary); font-size: 13px; flex: 1 1 260px; }
+    .history-export-status.error { color: var(--red); }
 
     .tx-row {
       display: grid;
@@ -3356,6 +3359,9 @@
     </div>
   </div>
 
+  <!-- Builds the "Download full history" file (one row per balance change). -->
+  <script src="history-csv.js"></script>
+
   <!-- Builds the "Download CSV" file (holdings and DeFi positions). -->
   <script src="holdings-csv.js"></script>
   <!-- A looked-up wallet's place in the page address (#/account/G…). -->
@@ -4967,6 +4973,7 @@
     let currentTab = "tokens";
     let currentAggTab = "tokens";
     let historyData = null;
+    let historyExport = null; // { key (address or "all"), count, busy, message, error }: the history CSV download
     let claimableData = null;
     let nftsData = null;
     let portfolioHistory = null;
@@ -5686,6 +5693,12 @@
         case "download-csv":
           downloadHoldingsCsv();
           break;
+        case "download-history-csv":
+          downloadHistoryCsv();
+          break;
+        case "download-all-history-csv":
+          downloadAllHistoryCsv();
+          break;
 
         // Cramer overlay. The backdrop closes only on a click on itself, not
         // on a click that bubbled up from the panel inside it.
@@ -6247,9 +6260,12 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         return;
       }
 
-      container.innerHTML = `
+      // History: the full history of every wallet, as one file; a wallet's
+      // recent activity is on its own History tab.
+      const download = currentAggTab === "history" ? historyExportBar("all", (d.wallets || []).length) : "";
+      container.innerHTML = `${download}
         <div class="empty-state">
-          Select an individual wallet from the panel above to view ${currentAggTab}.
+          Select an individual wallet from the panel above to view ${currentAggTab === "history" ? "its recent history" : currentAggTab}.
         </div>
       `;
     }
@@ -7669,7 +7685,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         return;
       }
 
-      let html = '<div class="tx-list">';
+      let html = historyExportBar(currentData.address) + '<div class="tx-list">';
       historyData.history.forEach((tx) => {
         const typeClass = ["payment", "create_account", "change_trust", "manage_sell_offer", "manage_buy_offer", "path_payment_strict_receive", "path_payment_strict_send"].includes(tx.type) ? tx.type : "default";
         const typeLabel = tx.type.replace(/_/g, " ");
@@ -7708,6 +7724,109 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       });
       html += "</div>";
       container.innerHTML = html;
+    }
+
+    // "Download full history": a wallet's whole history from Horizon as a
+    // CSV file, one row per balance change; or, on All Wallets, every saved
+    // wallet's in one file. The server reads the rows (lib/history-export.js),
+    // one wallet per request; public/history-csv.js builds the file. The tab
+    // itself shows only the latest 30.
+    const HISTORY_EXPORT_HINT = "One row per balance change (payments, swaps, trades, pool and DeFi transfers, network fees), as far back as Horizon keeps history.";
+
+    /** key: a wallet's address, or "all" for All Wallets. */
+    function historyExportBar(key, count) {
+      const st = historyExport && historyExport.key === key ? historyExport : null;
+      const label = key === "all" ? `Download full history of all ${count} wallets (CSV)` : "Download full history (CSV)";
+      // Each data-action spelled out: the listener has a case for both.
+      const action = key === "all" ? 'data-action="download-all-history-csv"' : 'data-action="download-history-csv"';
+      return `
+        <div class="history-export" data-export-key="${escapeHtml(key)}">
+          <button class="btn btn-secondary" ${action} ${st && st.busy ? "disabled" : ""}
+            title="Every balance change in ${key === "all" ? "these wallets'" : "this wallet's"} history, as a spreadsheet file">${st && st.busy ? "Preparing…" : escapeHtml(label)}</button>
+          <span class="history-export-status${st && st.error ? " error" : ""}">${escapeHtml(st ? st.message : HISTORY_EXPORT_HINT)}</span>
+        </div>`;
+    }
+
+    function showHistoryExport(state) {
+      historyExport = state;
+      const bar = document.querySelector(".history-export");
+      if (bar && bar.getAttribute("data-export-key") === state.key) {
+        bar.outerHTML = historyExportBar(state.key, state.count);
+      }
+    }
+
+    /** One wallet's rows from the server; waits its turn when the server is busy with other exports. */
+    async function fetchWalletHistory(address, onWait) {
+      for (let attempt = 0; ; attempt++) {
+        const res = await fetch(`${API_BASE}/api/v1/account/${address}/history/export`);
+        if (res.ok) return res.json();
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 429 && attempt < 4) {
+          onWait && onWait();
+          await new Promise((r) => setTimeout(r, 15_000));
+          continue;
+        }
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+    }
+
+    function saveCsv(csv, name) {
+      // The byte-order mark tells Excel the file is UTF-8.
+      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    }
+
+    async function downloadHistoryCsv() {
+      if (!currentData || (historyExport && historyExport.busy) || !window.HistoryCsv) return;
+      const address = currentData.address;
+      // Its label, if it's a saved wallet (labels live in this browser only).
+      const saved = loadWalletListLocal().find((w) => w.address === address);
+      const key = address;
+      const busy = (message) => showHistoryExport({ key, busy: true, message });
+      busy("Reading the history from Horizon… a busy wallet can take a minute or two.");
+      try {
+        const r = await fetchWalletHistory(address, () => busy("Other history downloads are running; waiting for a turn…"));
+        const result = { ...r, label: saved && saved.label ? saved.label : "" };
+        saveCsv(HistoryCsv.build([result]), HistoryCsv.fileName(address, r.from, r.to));
+        showHistoryExport({ key, busy: false, message: HistoryCsv.summary([result]) });
+      } catch (e) {
+        showHistoryExport({ key, busy: false, error: true, message: `Couldn't export the history: ${e.message}` });
+      }
+    }
+
+    // All Wallets: each saved wallet in turn (the server reads two at most at
+    // once, for everyone), then one file.
+    async function downloadAllHistoryCsv() {
+      if (!portfolioData || (historyExport && historyExport.busy) || !window.HistoryCsv) return;
+      const wallets = (portfolioData.wallets || []).map((w) => ({ address: w.address, label: w.label || "" }));
+      if (!wallets.length) return;
+      const key = "all";
+      const count = wallets.length;
+      const results = [];
+      for (const [i, w] of wallets.entries()) {
+        const who = w.label || `${w.address.slice(0, 4)}…${w.address.slice(-4)}`;
+        const busy = (message) => showHistoryExport({ key, count, busy: true, message });
+        busy(`Reading wallet ${i + 1} of ${count} (${who}) from Horizon… a busy wallet can take a minute or two.`);
+        try {
+          const r = await fetchWalletHistory(w.address, () => busy(`Other history downloads are running; waiting for a turn (wallet ${i + 1} of ${count})…`));
+          results.push({ ...r, ...w });
+        } catch (e) {
+          results.push({ ...w, error: e.message });
+        }
+      }
+      const ok = results.filter((r) => !r.error);
+      if (ok.length) {
+        const froms = ok.map((r) => r.from).filter(Boolean).sort();
+        const tos = ok.map((r) => r.to).filter(Boolean).sort();
+        saveCsv(HistoryCsv.build(ok), HistoryCsv.fileName(null, froms[0], tos[tos.length - 1]));
+      }
+      showHistoryExport({ key, count, busy: false, error: !ok.length || ok.length < results.length, message: HistoryCsv.summary(results) });
     }
 
     // ── Render Claimable ──────────────────────────────────────
