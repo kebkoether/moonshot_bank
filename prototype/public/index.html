@@ -2103,6 +2103,53 @@
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
     }
 
+    /* A table wider than its card scrolls sideways inside the card. */
+    .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* Phones. Every page was wider than a 390 px screen (a wallet page by
+       about 230 px), so the whole page could be dragged sideways. Nothing
+       here applies above 600 px. */
+    @media (max-width: 600px) {
+      /* Header: the buttons wrap and get smaller (the inline padding on
+         "My Portfolio" and "+ Save" needs !important). */
+      .header-right { flex-wrap: wrap; gap: 8px; width: 100%; }
+      .header-right .btn, .header-right .wallet-btn { padding: 8px 12px !important; font-size: 12px !important; }
+      .network-badge { padding: 5px 10px; }
+      .search-box input { min-width: 0; }
+      .search-box .btn { padding: 10px 12px !important; white-space: nowrap; }
+
+      /* A wallet: Download CSV and Refresh go under the total, and the tabs
+         scroll sideways in their own row. */
+      .portfolio-header { flex-wrap: wrap; gap: 12px; }
+      .tabs { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab { flex: 0 0 auto; padding: 10px 12px; }
+
+      /* Stat cards: two columns that can shrink, with smaller numbers. */
+      .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .stat-card { padding: 14px; }
+      .stat-value { font-size: 18px; overflow-wrap: anywhere; }
+
+      /* History rows: type and amount on one line, details and time below. */
+      .tx-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 12px; }
+      .tx-type { justify-self: start; }
+      .tx-details { grid-row: 2; grid-column: 1; overflow-wrap: anywhere; }
+      .tx-time { grid-row: 2; grid-column: 2; }
+
+      /* Portfolio chart: the range buttons go under the title if need be. */
+      .chart-header { flex-wrap: wrap; gap: 8px; }
+      .chart-range-btns { max-width: 100%; overflow-x: auto; }
+
+      /* All Wallets: a smaller total (48 px made "$126,532,175.32" about
+         400 px wide), and the add-wallet form wraps. */
+      .agg-total { font-size: 32px; overflow-wrap: anywhere; }
+      .wallet-add-form { flex-wrap: wrap; }
+      .wallet-add-form input { flex: 1 1 140px; min-width: 0; max-width: none !important; }
+
+      /* Home: the whale tables fit with less padding. */
+      .whale-table th, .whale-table td { padding: 10px 8px; }
+    }
+
     /* ───────────────── Easter egg: Cramer soundboard ─────────────────
        Triggered by the Konami code (↑↑↓↓←→←→BA). All scoped under .cramer-*
        prefixes so it can't conflict with anything else in the page. */
@@ -6972,7 +7019,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         html += `</div>`;
 
         // Table of reserves
-        html += `<table class="defi-pool-table">`;
+        html += `<div class="table-scroll"><table class="defi-pool-table">`;
         html += `<thead><tr>`;
         html += `<th>Asset</th>`;
         html += `<th class="right">Supply</th>`;
@@ -7023,7 +7070,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
             : `<td class="right ${row.netUSD < 0 ? "negative" : ""}">${fmtUSD(row.netUSD)}</td>`;
           html += `</tr>`;
         }
-        html += `</tbody></table>`;
+        html += `</tbody></table></div>`;
 
         const footerLeft = [];
         if (group.totalBorrowedUSD > 0) {
