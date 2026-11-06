@@ -37,6 +37,7 @@ const { simulateContractCall, getTokenBalance, getTokenMetadata } = require("./s
 const pricingEngine = require("./pricing-engine");
 const BlendAdapter = require("./adapters/blend");
 const StellarSdk = require("@stellar/stellar-sdk");
+const { untilAborted } = require("./until-aborted");
 const { Address, nativeToScVal, scValToNative } = StellarSdk;
 
 // ── Config ──────────────────────────────────────────────────────────────────
@@ -542,12 +543,14 @@ async function fetchSoroswap() {
 const UPSHIFT_TIMEOUT_MS = 60_000;
 
 async function fetchUpshift() {
+  const signal = AbortSignal.timeout(UPSHIFT_TIMEOUT_MS);
   const res = await fetch("https://api.upshift.finance/v1/tokenized_vaults", {
     headers: { "User-Agent": "StellarScope/1.0" },
-    signal: AbortSignal.timeout(UPSHIFT_TIMEOUT_MS),
+    signal,
   });
   if (!res.ok) throw new Error(`Upshift HTTP ${res.status}`);
-  const all = await res.json();
+  // The body too: a read left pending would hold the refresh loop for good.
+  const all = await untilAborted(res.json(), signal);
   const vaults = (Array.isArray(all) ? all : []).filter(
     (v) => v.chain_type === "stellar" && v.is_visible
   );
@@ -686,13 +689,17 @@ function templarPretty(sym) {
 }
 
 async function fetchTemplar() {
+  // One deadline for both requests and their bodies. A body read left
+  // pending (see until-aborted.js) would hold the refresh loop, and with it
+  // every protocol on the DeFi tab, for good.
+  const signal = AbortSignal.timeout(15000);
   const [marketsRes, snapsRes] = await Promise.all([
-    fetch("https://app.templarfi.org/api/markets", { signal: AbortSignal.timeout(15000) }),
-    fetch("https://app.templarfi.org/api/snapshots?domain=app", { signal: AbortSignal.timeout(15000) }),
+    fetch("https://app.templarfi.org/api/markets", { signal }),
+    fetch("https://app.templarfi.org/api/snapshots?domain=app", { signal }),
   ]);
   if (!marketsRes.ok || !snapsRes.ok) throw new Error("templar api unavailable");
-  const marketsJson = await marketsRes.json();
-  const snapsJson = await snapsRes.json();
+  const marketsJson = await untilAborted(marketsRes.json(), signal);
+  const snapsJson = await untilAborted(snapsRes.json(), signal);
   const configs = new Map();
   for (const m of marketsJson.markets || []) configs.set(m.deployment, m);
 
@@ -714,12 +721,13 @@ async function fetchTemplar() {
   ].join("%2C");
   let prices = { ...(fetchTemplar._lastPrices || {}) };
   try {
+    const priceSignal = AbortSignal.timeout(12000);
     const pr = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${cgIds}&vs_currencies=usd`,
-      { signal: AbortSignal.timeout(12000) }
+      { signal: priceSignal }
     );
     if (pr.ok) {
-      const fresh = await pr.json();
+      const fresh = await untilAborted(pr.json(), priceSignal);
       prices = { ...prices, ...fresh };
       fetchTemplar._lastPrices = prices;
     }

@@ -14,6 +14,8 @@
  * every XLM holding (and each snapshot's xlm_price_usd) was ~25% too high.
  */
 
+const { untilAborted } = require("./until-aborted");
+
 const HORIZON_URL = process.env.HORIZON_URL || "https://horizon.stellar.org";
 const COINGECKO_API = "https://api.coingecko.com/api/v3";
 
@@ -42,7 +44,9 @@ async function fetchJson(url) {
   try {
     const res = await fetch(url, { signal: ctrl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    // The timeout covers the body too: a read left pending would hold the
+    // shared refresh, and every price request after it, for good.
+    return await untilAborted(res.json(), ctrl.signal);
   } finally {
     clearTimeout(timer);
   }
