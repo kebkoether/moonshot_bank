@@ -7,8 +7,9 @@
  * 2. Otherwise the asset's USDC book: its mid price, if the spread is under
  *    10% and it has at least USDC_MIN_DEPTH_USD of orders on each side within
  *    10% of that mid.
- * 3. Otherwise the XLM book's best bid × XLM's price, or no price if nobody
- *    bids for the asset in XLM.
+ * 3. Otherwise a bid: the XLM book's best × XLM's price, or the USDC book's
+ *    if that's higher, with at least USDC_MIN_BID_USD of bids at or above it
+ *    and not above the XLM book's ask. No price if nobody bids in XLM.
  *
  * Step 2 is new. Many assets trade in USDC, not XLM, and their XLM book is a
  * few stray offers far apart, so step 3 valued them off a lowball bid. On
@@ -18,6 +19,16 @@
  * the RWA tab, was 23% short. Step 2 asks for depth because a USDC book is
  * as easy to set up as an XLM one: a few dollars of orders shouldn't set the
  * price of a whole holding (the AMM layer asks pools for $10,000 of depth).
+ *
+ * Step 3 used to take the XLM bid alone. An asset traded in USDC can have a
+ * USDC bid close to its value and an XLM bid far below it. On 2026-11-06:
+ * Zeam's gold token XAUZ (backed by PAXG and XAUT) had $150 bid at 4,016
+ * USDC and an ask of 4,067 ($450 and $327 within 10%, under step 2's $1,000),
+ * but an XLM bid of 1,298.5 XLM: $202 for an ounce of gold. Zeam's ZARZ (a
+ * rand, 181,527 holders): $75 bid at $0.0601, against an XLM bid worth
+ * $0.016. FxDAO's USDx: $4,386 bid at $1.00, against $0.80. A bid is what
+ * someone will pay for the asset now; the USDC one needs $20 behind it, as
+ * most USDC books' best bid is a stray order of cents.
  */
 
 const { Asset } = require("@stellar/stellar-sdk");
@@ -25,6 +36,7 @@ const { USDC_ISSUER } = require("./xlm-price");
 
 const MAX_SPREAD = 0.1;
 const USDC_MIN_DEPTH_USD = 1000;
+const USDC_MIN_BID_USD = 20;
 const PRICE_TTL_MS = 60_000;
 const USDC = new Asset("USDC", USDC_ISSUER);
 
@@ -54,6 +66,20 @@ function usdcBookMid(book) {
 }
 
 /**
+ * The price at which the asset/USDC book's bids, from the best down, add up
+ * to USDC_MIN_BID_USD: what that much of the asset sells for there now. null
+ * if they add up to less. (A bid's amount is in USDC.)
+ */
+function usdcBidPrice(book) {
+  let total = 0;
+  for (const o of book?.bids || []) {
+    total += parseFloat(o.amount);
+    if (total >= USDC_MIN_BID_USD) return parseFloat(o.price);
+  }
+  return null;
+}
+
+/**
  * @param {object} deps
  * @param {object} deps.horizon A StellarSdk Horizon.Server (only .orderbook is used).
  * @param {function} deps.getXLMPrice Resolves to { usd, ... }.
@@ -79,14 +105,15 @@ function createSdexPricer({ horizon, getXLMPrice }) {
       } else {
         // No usable mid in XLM: a tight, deep USDC book is a better price
         // than a lone bid.
-        let usdcMid = null;
+        let usdcBook = null;
         if (!asset.equals(USDC)) {
           try {
-            usdcMid = usdcBookMid(await horizon.orderbook(asset, USDC).call());
+            usdcBook = await horizon.orderbook(asset, USDC).call();
           } catch (e) {
             console.warn(`USDC book for ${assetCode} unavailable: ${e.message}`);
           }
         }
+        const usdcMid = usdcBook ? usdcBookMid(usdcBook) : null;
         if (usdcMid !== null) {
           const price = { usd: usdcMid, change24h: 0, pair: "USDC" };
           cache.set(cacheKey, { price, ts: Date.now() });
@@ -97,7 +124,17 @@ function createSdexPricer({ horizon, getXLMPrice }) {
         // a wallet by orders of magnitude. Leave unpriced; later layers may
         // still price it.
         if (bestBid === null) return null;
-        priceInXLM = bestBid; // conservative: the bid
+        // Conservative: a bid. The USDC book's, when it's higher than the XLM
+        // bid and at least USDC_MIN_BID_USD stands at or above it; not above
+        // the XLM book's ask, as anyone could fill such a bid from that ask.
+        const xlmUsd = (await getXLMPrice()).usd;
+        const usdcBid = usdcBook ? usdcBidPrice(usdcBook) : null;
+        if (usdcBid !== null && usdcBid > bestBid * xlmUsd && !(bestAsk !== null && usdcBid > bestAsk * xlmUsd)) {
+          const price = { usd: usdcBid, change24h: 0, pair: "USDC" };
+          cache.set(cacheKey, { price, ts: Date.now() });
+          return price;
+        }
+        priceInXLM = bestBid;
       }
 
       const xlmPrice = await getXLMPrice();
@@ -111,4 +148,4 @@ function createSdexPricer({ horizon, getXLMPrice }) {
   };
 }
 
-module.exports = { createSdexPricer, usdcBookMid, MAX_SPREAD, USDC_MIN_DEPTH_USD };
+module.exports = { createSdexPricer, usdcBookMid, usdcBidPrice, MAX_SPREAD, USDC_MIN_DEPTH_USD, USDC_MIN_BID_USD };
