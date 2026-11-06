@@ -1,5 +1,6 @@
 /**
- * A wallet's history as a CSV file: one row per balance change.
+ * A wallet's history, one row per balance change: the rows behind the
+ * "Download full history (CSV)" buttons (public/history-csv.js builds the file).
  *
  * The rows come from Horizon:
  * - effects: every credit and debit of the wallet (payments, swaps, DEX
@@ -24,6 +25,7 @@ const MAX_ROWS = 10_000;
 const MAX_PAGES = 100;
 const TIME_LIMIT_MS = 100_000;
 
+// Each row's fields, in the file's order (the file adds the wallet's label).
 const COLUMNS = [
   "date_utc", "wallet", "type", "direction", "amount", "asset", "asset_id",
   "counterparty", "operation_type", "memo", "transaction_hash", "operation_id", "notes",
@@ -426,32 +428,6 @@ async function readHistory(address, {
   };
 }
 
-// ── CSV ─────────────────────────────────────────────────────────────────────
-
-/** A text cell: never the start of a formula (=, +, -, @, tab, CR). Amounts are numbers, not text. */
-function text(v) {
-  const s = v == null ? "" : String(v);
-  return /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
-}
-
-function quote(cell) {
-  const s = String(cell);
-  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
-
-function toCsv(rows) {
-  const lines = [COLUMNS.join(",")];
-  for (const r of rows) {
-    lines.push(COLUMNS.map((c) => quote(c === "amount" ? r.amount : text(r[c]))).join(","));
-  }
-  return lines.join("\r\n") + "\r\n";
-}
-
-function fileName(address, from, to) {
-  const d = (iso) => (iso ? String(iso).slice(0, 10).replace(/-/g, "") : "none");
-  return `stellarscope-history-${address.slice(0, 8)}-${d(from)}-${d(to)}.csv`;
-}
-
 // ── One export at a time per wallet, two at most, kept for 5 minutes ───────
 
 const CACHE_MS = 5 * 60_000;
@@ -490,7 +466,10 @@ function _resetForTests() {
   running.clear();
 }
 
+/** Rows as arrays in COLUMNS order, for JSON. */
+const asArrays = (rows) => rows.map((r) => COLUMNS.map((c) => r[c]));
+
 module.exports = {
-  readHistory, exportHistory, buildRows, toCsv, fileName, COLUMNS,
+  readHistory, exportHistory, buildRows, asArrays, COLUMNS,
   PAGE_SIZE, MAX_ROWS, MAX_PAGES, TIME_LIMIT_MS, _resetForTests,
 };

@@ -169,20 +169,6 @@ test("each balance change is a row: what moved, which way, with whom, in which t
   assert.deepEqual(sums(r.rows), { XLM: "56.3946555", USDC: "151.2000000", "pool shares": "5.8000000" });
 });
 
-test("the CSV: one header, quoted where needed, and no cell a spreadsheet would run as a formula", () => {
-  const row = {
-    date_utc: "2026-01-01T00:00:00Z", wallet: ME, type: "payment", direction: "out", amount: "-1.0000000",
-    asset: "USDC", asset_id: USDC_ISSUER, counterparty: BOB, operation_type: "payment",
-    memo: '=HYPERLINK("http://x","y"), ok', transaction_hash: "ab", operation_id: "1", notes: "",
-  };
-  const csv = H.toCsv([row]);
-  const [head, line] = csv.trimEnd().split("\r\n");
-  assert.equal(head, H.COLUMNS.join(","));
-  assert.ok(line.includes(',-1.0000000,'), "an amount stays a number");
-  assert.ok(line.includes(`"'=HYPERLINK(""http://x"",""y""), ok"`), "a memo can't be a formula");
-  assert.equal(H.fileName(ME, "2025-09-21T22:06:11Z", "2026-11-05T23:14:01Z"), "stellarscope-history-GCTSFIIC-20250921-20261105.csv");
-});
-
 // ── Reading ─────────────────────────────────────────────────────────────────
 
 /** A long history: n transactions of three payments in, each with a fee. */
@@ -301,7 +287,7 @@ test("two requests for one wallet share one reading; a third wallet waits its tu
 
 // ── The endpoint and the button ─────────────────────────────────────────────
 
-test("GET /api/v1/account/:address/history/export sends the CSV file", async () => {
+test("GET /api/v1/account/:address/history/export sends the rows, for the page to build the file", async () => {
   H._resetForTests();
   const h = richHistory();
   const asked = [];
@@ -320,15 +306,16 @@ test("GET /api/v1/account/:address/history/export sends the CSV file", async () 
     const { app } = require("../server.js");
     const res = await request(app, "GET", `/api/v1/account/${ME}/history/export`);
     assert.equal(res.status, 200);
-    assert.match(res.headers["content-type"], /^text\/csv/);
-    assert.equal(res.headers["content-disposition"], 'attachment; filename="stellarscope-history-GCTSFIIC-20260101-20260101.csv"');
-    assert.equal(res.headers["x-history-rows"], "27");
-    assert.equal(res.headers["x-history-complete"], "1");
-    assert.equal(res.headers["x-history-from-creation"], "1");
-    assert.equal(res.headers["x-history-missing-operations"], "0");
-    const lines = res.raw.replace(/^\uFEFF/, "").trimEnd().split("\r\n");
-    assert.equal(lines[0], H.COLUMNS.join(","));
-    assert.equal(lines.length, 28);
+    assert.match(res.headers["content-type"], /^application\/json/);
+    const { rows, columns, ...meta } = res.body;
+    assert.deepEqual(meta, {
+      address: ME, complete: true, limit: null, from: "2026-01-01T00:01:00Z", to: "2026-01-01T00:12:00Z",
+      startsAtCreation: true, missingOperations: 0,
+    });
+    assert.deepEqual(columns, H.COLUMNS);
+    assert.equal(rows.length, 27);
+    const last = Object.fromEntries(columns.map((c, i) => [c, rows[26][i]]));
+    assert.deepEqual([last.type, last.amount, last.asset, last.counterparty, last.memo], ["payment", "-5.0000000", "XLM", BOB, "rent"]);
     assert.deepEqual(asked.map((q) => q.forAccount), Array(asked.length).fill(ME));
     assert.ok(asked.every((q) => q.order === "desc" && q.limit === 200));
     assert.ok(asked.filter((q) => q.kind === "transactions").every((q) => q.includeFailed === true), "failed transactions' fees too");
@@ -342,10 +329,17 @@ test("GET /api/v1/account/:address/history/export sends the CSV file", async () 
   }
 });
 
-test("the History tab has the button, wired to the export", () => {
+test("the buttons: a wallet's History tab, and All Wallets' History tab; the page loads the file builder", async () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
-  assert.match(html, /data-action="download-history-csv"/);
+  assert.match(html, /let html = historyExportBar\(currentData\.address\) \+ '<div class="tx-list">';/);
+  assert.match(html, /currentAggTab === "history" \? historyExportBar\("all", \(d\.wallets \|\| \[\]\)\.length\)/);
   assert.match(html, /case "download-history-csv":\s*downloadHistoryCsv\(\);/);
+  assert.match(html, /case "download-all-history-csv":\s*downloadAllHistoryCsv\(\);/);
   assert.match(html, /\/api\/v1\/account\/\$\{address\}\/history\/export/);
-  assert.match(html, /let html = historyExportBar\(\) \+ '<div class="tx-list">';/);
+  const tag = html.indexOf('<script src="history-csv.js"></script>');
+  assert.ok(tag > 0 && tag < html.indexOf("function downloadHistoryCsv()"), "loaded before the page script");
+  const { app } = require("../server.js");
+  const res = await request(app, "GET", "/history-csv.js");
+  assert.equal(res.status, 200);
+  assert.match(res.headers["content-type"], /javascript/);
 });

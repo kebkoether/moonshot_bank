@@ -557,9 +557,11 @@ app.get("/api/v1/account/:address/history", async (req, res) => {
   }
 });
 
-// The wallet's whole history as a CSV file, one row per balance change
+// The wallet's whole history, one row per balance change
 // (lib/history-export.js): as far back as Horizon keeps it, up to 10,000 rows.
-// Up to a few hundred Horizon requests, so only from the site's own pages.
+// The page builds the CSV file (public/history-csv.js), for one wallet or
+// all the saved ones. Up to a few hundred Horizon requests per wallet, so
+// only from the site's own pages.
 app.get("/api/v1/account/:address/history/export", sameOriginOnly, async (req, res) => {
   const { address } = req.params;
   if (!StellarSdk.StrKey.isValidEd25519PublicKey(address)) {
@@ -579,20 +581,19 @@ app.get("/api/v1/account/:address/history/export", sameOriginOnly, async (req, r
     if (!r.rows.length && !r.complete) {
       return res.status(502).json({ error: "Couldn't read the history from Horizon. Try again in a minute." });
     }
-    res.set({
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${historyExport.fileName(address, r.from, r.to)}"`,
-      "Cache-Control": "no-store",
-      "X-History-Rows": String(r.rows.length),
-      "X-History-From": r.from || "",
-      "X-History-To": r.to || "",
-      "X-History-Complete": r.complete ? "1" : "0",
-      "X-History-From-Creation": r.startsAtCreation ? "1" : "0",
-      "X-History-Limit": r.limit || "",
-      "X-History-Missing-Operations": String(r.missingOperations),
+    res.set("Cache-Control", "no-store");
+    res.json({
+      address,
+      complete: r.complete,
+      limit: r.limit,
+      from: r.from,
+      to: r.to,
+      startsAtCreation: r.startsAtCreation,
+      missingOperations: r.missingOperations,
+      // Arrays in the order of `columns`: a third the size of objects.
+      columns: historyExport.COLUMNS,
+      rows: historyExport.asArrays(r.rows),
     });
-    // The byte-order mark tells Excel the file is UTF-8.
-    res.send("\uFEFF" + historyExport.toCsv(r.rows));
   } catch (e) {
     if (e.busy) return res.status(429).json({ error: e.message });
     console.error("History export error:", e.message);
