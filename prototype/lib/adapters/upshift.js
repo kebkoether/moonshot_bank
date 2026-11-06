@@ -24,6 +24,7 @@
  */
 const { getTokenBalanceStrict, simulateContractCall, isTransientRpcError } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
+const { untilAborted } = require("../until-aborted");
 const { nativeToScVal, scValToNative } = StellarSdk;
 
 const UPSHIFT_API_BASE = "https://api.upshift.finance/v1";
@@ -80,7 +81,8 @@ function refreshVaultList() {
     try {
       const res = await fetch(`${UPSHIFT_API_BASE}/tokenized_vaults`, { signal: ctrl.signal });
       if (!res.ok) throw new Error("HTTP " + res.status);
-      const all = await res.json();
+      // Or listRefresh would stay set, and the list never refresh again.
+      const all = await untilAborted(res.json(), ctrl.signal);
       apiVaults = (Array.isArray(all) ? all : []).filter(
         (v) => v.chain_type === "stellar" && v.status === "active" && v.stellar_vault_metadata
       );

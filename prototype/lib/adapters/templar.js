@@ -53,6 +53,7 @@
  */
 
 const pricing = require("../pricing-engine");
+const { untilAborted } = require("../until-aborted");
 
 const TEMPLAR_G_ADDRESSES = new Set([
   "GDJ4JZXZELZD737NVFORH4PSSQDWFDZTKW3AIDKHYQG23ZXBPDGGQBJK",
@@ -87,7 +88,9 @@ async function _fetchJson(url) {
   try {
     const res = await fetch(url, { signal: ctrl.signal });
     if (!res.ok) throw new Error(`Horizon HTTP ${res.status}`);
-    return await res.json();
+    // A page whose body never settled would hold this wallet's scan, which
+    // every later load of the wallet waits on, for good.
+    return await untilAborted(res.json(), ctrl.signal);
   } finally {
     clearTimeout(t);
   }
