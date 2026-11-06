@@ -7,7 +7,7 @@
 // underlying units. current_liquidity_rate / current_variable_borrow_rate are
 // RAY-scaled rates — verified empirically 2026-08-14: the SolvBTC reserve
 // returned 0.10228, matching the 10.23% APY shown on app.k2lend.com.
-const { simulateContractCall } = require("../soroban-rpc");
+const { simulateContractCall, getTokenBalanceStrict } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
 const { Address, scValToNative } = StellarSdk;
 const { priceSorobanToken } = require("../pricing-engine");
@@ -61,16 +61,12 @@ async function readDecimals(asset) {
   throw new Error(`could not read decimals for ${asset}: ${lastErr && lastErr.message}`);
 }
 
-// Returns null when the reserve can't be read reliably; callers skip it.
+// Throws when the reserve's decimals can't be read: the whole read fails (the
+// server then serves K2's last good result, or shows it as unavailable), as
+// skipping the reserve dropped the wallet's position in it without a sign.
 async function getReserveMeta(asset, data) {
   if (reserveMetaCache.has(asset)) return reserveMetaCache.get(asset);
-  let decimals;
-  try {
-    decimals = await readDecimals(asset);
-  } catch (e) {
-    console.error("[k2] skipping reserve \u2014", e.message);
-    return null;
-  }
+  const decimals = await readDecimals(asset);
   let symbol = null;
   try { symbol = await view(asset, "symbol"); } catch (_) {}
   let cleanSymbol = typeof symbol === "string" ? symbol.replace(/\0+$/, "") : asset.slice(0, 4);
@@ -86,13 +82,54 @@ async function getReserveMeta(asset, data) {
   return meta;
 }
 
-async function tokenBalance(tokenId, userScVal) {
-  try {
-    const b = await view(tokenId, "balance", [userScVal]);
-    return b == null ? 0n : BigInt(b);
-  } catch (_) {
-    return 0n;
-  }
+// A balance that can't be read throws (after the RPC retries): read as 0, a
+// failed debt read dropped the wallet's K2 borrow and overstated its net worth
+// by the whole debt, and the server kept that as K2's last good result.
+async function tokenBalance(tokenId, userAddress) {
+  return BigInt(await getTokenBalanceStrict(tokenId, userAddress));
+}
+
+/** One reserve's row for the wallet, or null if it has nothing there. Throws if any read fails. */
+async function readReserve(asset, userAddress) {
+  const data = await getReserveData(asset);
+  if (!data) return null;
+  const meta = await getReserveMeta(asset, data);
+  const [scaledSupply, scaledDebt] = await Promise.all([
+    tokenBalance(meta.aToken, userAddress),
+    tokenBalance(meta.debtToken, userAddress),
+  ]);
+  if (scaledSupply === 0n && scaledDebt === 0n) return null;
+
+  const liquidityIndex = Number(data.liquidity_index) / RAY;
+  const borrowIndex = Number(data.variable_borrow_index) / RAY;
+  const supplyApy = Number(data.current_liquidity_rate) / RAY;
+  const borrowApy = Number(data.current_variable_borrow_rate) / RAY;
+  const denom = 10 ** meta.decimals;
+  const supplied = (Number(scaledSupply) / denom) * liquidityIndex;
+  const borrowed = (Number(scaledDebt) / denom) * borrowIndex;
+
+  let price = null;
+  // Second arg is an OPTIONS object ({ decimals }), not a symbol string.
+  // No price is shown as "no price", not dropped (see getPositions).
+  try { price = await priceSorobanToken(asset, { decimals: meta.decimals }); } catch (_) {}
+  const usd = price && price.usd != null ? price.usd : null;
+  const suppliedUSD = usd != null ? supplied * usd : 0;
+  const borrowedUSD = usd != null ? borrowed * usd : 0;
+
+  return {
+    asset: meta.symbol,
+    assetAddress: asset,
+    decimals: meta.decimals,
+    supplied,
+    suppliedUSD,
+    supplyApy,
+    borrowed,
+    borrowedUSD,
+    borrowApy,
+    netUSD: suppliedUSD - borrowedUSD,
+    price: usd != null ? { usd, source: price.source || "pricing-engine" } : null,
+    utilization: null,
+  };
 }
 
 /**
@@ -102,57 +139,18 @@ async function tokenBalance(tokenId, userScVal) {
  * `{ protocol: "blend", ...group }` spread.
  */
 async function getPositions(userAddress) {
-  const userScVal = new Address(userAddress).toScVal();
   const reserves = await getReservesList();
   if (!reserves.length) return [];
 
-  const rows = [];
+  // Every reserve at once (they were read one after another: about 15 RPC
+  // calls in a row, which ran past the 8-second adapter limit when several
+  // wallets loaded together). Any read that fails fails the whole result.
+  const rows = (await Promise.all(reserves.map((asset) => readReserve(asset, userAddress)))).filter(Boolean);
   let totalSuppliedUSD = 0;
   let totalBorrowedUSD = 0;
-
-  for (const asset of reserves) {
-    let data;
-    try { data = await getReserveData(asset); } catch (_) { continue; }
-    if (!data) continue;
-    const meta = await getReserveMeta(asset, data);
-    if (!meta) continue; // decimals unreadable — omit rather than guess
-    const [scaledSupply, scaledDebt] = await Promise.all([
-      tokenBalance(meta.aToken, userScVal),
-      tokenBalance(meta.debtToken, userScVal),
-    ]);
-    if (scaledSupply === 0n && scaledDebt === 0n) continue;
-
-    const liquidityIndex = Number(data.liquidity_index) / RAY;
-    const borrowIndex = Number(data.variable_borrow_index) / RAY;
-    const supplyApy = Number(data.current_liquidity_rate) / RAY;
-    const borrowApy = Number(data.current_variable_borrow_rate) / RAY;
-    const denom = 10 ** meta.decimals;
-    const supplied = (Number(scaledSupply) / denom) * liquidityIndex;
-    const borrowed = (Number(scaledDebt) / denom) * borrowIndex;
-
-    let price = null;
-    // Second arg is an OPTIONS object ({ decimals }), not a symbol string.
-    try { price = await priceSorobanToken(asset, { decimals: meta.decimals }); } catch (_) {}
-    const usd = price && price.usd != null ? price.usd : null;
-    const suppliedUSD = usd != null ? supplied * usd : 0;
-    const borrowedUSD = usd != null ? borrowed * usd : 0;
-    totalSuppliedUSD += suppliedUSD;
-    totalBorrowedUSD += borrowedUSD;
-
-    rows.push({
-      asset: meta.symbol,
-      assetAddress: asset,
-      decimals: meta.decimals,
-      supplied,
-      suppliedUSD,
-      supplyApy,
-      borrowed,
-      borrowedUSD,
-      borrowApy,
-      netUSD: suppliedUSD - borrowedUSD,
-      price: usd != null ? { usd, source: price.source || "pricing-engine" } : null,
-      utilization: null,
-    });
+  for (const r of rows) {
+    totalSuppliedUSD += r.suppliedUSD;
+    totalBorrowedUSD += r.borrowedUSD;
   }
 
   if (!rows.length) return [];
