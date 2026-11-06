@@ -14,7 +14,7 @@ const assert = require("node:assert/strict");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { Keypair, StrKey } = require("@stellar/stellar-sdk");
+const { Asset, Keypair, Networks, StrKey } = require("@stellar/stellar-sdk");
 
 // No real network: the aggregator (last layer) is mocked, and CoinGecko is a fake.
 const aggregator = require("../lib/soroswap-aggregator");
@@ -112,6 +112,20 @@ test("Figure's YLDS is $1 (its issuer anchors it to USD); YLDS from a look-alike
   assert.equal(await pricing.priceClassicAsset(noMarket, "YLDS", "GBA2ZKISUQKBZ7FEIDI3VVPI2SXVMO4MJD77IQMRA7ZYTPTLZVJFY7R5"), null);
 });
 
+test("MoneyGram's MGUSD is $1, and its contract too; MGUSD from look-alike issuers isn't", async () => {
+  const MONEYGRAM = "GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ";
+  const p = await pricing.priceClassicAsset(noMarket, "MGUSD", MONEYGRAM);
+  assert.deepEqual(p, { usd: 1, change24h: 0, source: "stablecoin", confidence: "high" });
+  // The contract MoneyGram's stellar.toml lists for MGUSD is its Stellar Asset Contract.
+  const sac = new Asset("MGUSD", MONEYGRAM).contractId(Networks.PUBLIC);
+  assert.equal(sac, "CDK2LDSYUKPEFN3HNE7K7ETUT3VIOBHSOXAK5CTO4A4RKKZQUCAIWCJA");
+  assert.equal((await pricing.priceSorobanToken(sac))?.usd, 1);
+  // Real look-alikes on mainnet (Horizon, 2026-11-06): 10 billion "MGUSD" from
+  // an issuer ending in ...MGUSD, and 88.4 billion from another.
+  assert.equal(await pricing.priceClassicAsset(noMarket, "MGUSD", "GDFAPQOSUUISQU4CN2G2QYPJK4G532N3337PHVMIDTHTNEAVFWUMGUSD"), null);
+  assert.equal(await pricing.priceClassicAsset(noMarket, "MGUSD", "GBX7XCWI3ZLDZ72WHNLDM4P2SFXZQMVQJAN37BWHWGP2DWZ3BW5N5USD"), null);
+});
+
 test("a token CoinGecko lists only in its refresh is matched on the full issuer", async () => {
   const real = Keypair.random().publicKey();
   coinsList = [{ id: "test-coin", symbol: "tst", platforms: { stellar: `TSTX-${real}` } }];
@@ -127,7 +141,7 @@ test("every full issuer in the hardcoded price lists is a valid Stellar address"
   const issuers = Object.keys(pricing.STABLECOINS).map((k) => k.split(":")[1]);
   const seedSource = fs.readFileSync(path.join(__dirname, "../lib/token-price-map.js"), "utf8");
   for (const m of seedSource.matchAll(/issuer: "(G[A-Z2-7]{55})"/g)) issuers.push(m[1]);
-  assert.ok(issuers.length >= 9, `found ${issuers.length}`); // 4 stablecoins + 5 full seed issuers today
+  assert.ok(issuers.length >= 10, `found ${issuers.length}`); // 8 stablecoins + 6 full seed issuers today
   const invalid = issuers.filter((i) => !StrKey.isValidEd25519PublicKey(i));
   assert.deepEqual(invalid, []);
 });

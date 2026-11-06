@@ -53,6 +53,11 @@ const STABLECOINS = {
   // no CoinGecko listing and no DEX market it had no price, so a wallet
   // holding 25.3M YLDS showed as $16.86.
   "YLDS:GAC7MOPTQLQUM3KC24AW4GHS3RLF72LPEZO54AH7EZ6TSMGRB5SOAVH3": 1.0,
+  // MoneyGram's MGUSD: "USD-backed stablecoin issued by Bridge on behalf of
+  // MoneyGram", anchored to USD in its issuer's stellar.toml
+  // (mgusd.moneygram.com). Not on CoinGecko, and no DEX market, so the RWA
+  // tab still showed the $25M typed in from Stellar Expert in June.
+  "MGUSD:GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ": 1.0,
 };
 
 // ── Cache ────────────────────────────────────────────────────────────────────
