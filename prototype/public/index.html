@@ -3358,6 +3358,8 @@
 
   <!-- Builds the "Download CSV" file (holdings and DeFi positions). -->
   <script src="holdings-csv.js"></script>
+  <!-- A looked-up wallet's place in the page address (#/account/G…). -->
+  <script src="wallet-url.js"></script>
   <script>
     // localStorage key for the currently-connected wallet address. The
     // module-<script> at the top also declares this — but const inside a
@@ -3438,11 +3440,12 @@
         t.classList.toggle("active", t.getAttribute("data-page") === page);
       });
 
-      // Update URL hash without scrolling
+      // Update URL hash without scrolling. Tabs replace the current entry,
+      // except when leaving a looked-up wallet: then Back returns to it.
       const newHash = page === "rwas" ? "#/rwas" : page === "defi" ? "#/defi" : page === "fx" ? "#/fx" : page === "profile" ? "#/profile" : "";
-      if (location.hash !== newHash) {
-        history.replaceState(null, "", location.pathname + location.search + newHash);
-      }
+      const move = WalletUrl.historyAction(location.hash, newHash);
+      if (move === "push") history.pushState(null, "", location.pathname + location.search + newHash);
+      else if (move === "replace") history.replaceState(null, "", location.pathname + location.search + newHash);
 
       if (page === "rwas") {
         await renderRwasPage();
@@ -4905,6 +4908,8 @@
 
     function pageFromHash() {
       const h = location.hash || "";
+      const account = WalletUrl.accountFromHash(h);
+      if (account) return { page: "account", address: account };
       if (h === "#/rwas") return { page: "rwas" };
       if (h === "#/defi") return { page: "defi" };
       if (h === "#/fx") return { page: "fx" };
@@ -4916,8 +4921,23 @@
       return { page: "portfolio" };
     }
 
+    // A looked-up wallet from the address bar (#/account/G…): opened directly,
+    // or reached with Back / Forward.
+    function showAccountFromHash(address) {
+      currentPage = "portfolio";
+      document.querySelectorAll(".page-nav-tab").forEach((t) => {
+        t.classList.toggle("active", t.getAttribute("data-page") === "portfolio");
+      });
+      document.getElementById("addressInput").value = address;
+      return loadPortfolio();
+    }
+
     window.addEventListener("hashchange", async () => {
-      const { page, slug, protocolId } = pageFromHash();
+      const { page, slug, protocolId, address } = pageFromHash();
+      if (page === "account") {
+        await showAccountFromHash(address);
+        return;
+      }
       if (page === "defi-detail") {
         currentPage = "defi";
         document.querySelectorAll(".page-nav-tab").forEach((t) => {
@@ -5198,9 +5218,13 @@
         if (loaded) return;
       }
 
-      // Honor deep-links (#/rwas, #/rwa/{slug}, #/defi, #/defi/{id})
-      // before loading leaderboards.
-      const { page, slug, protocolId } = pageFromHash();
+      // Honor deep-links (#/account/{address}, #/rwas, #/rwa/{slug}, #/defi,
+      // #/defi/{id}) before loading leaderboards.
+      const { page, slug, protocolId, address } = pageFromHash();
+      if (page === "account") {
+        showAccountFromHash(address);
+        return;
+      }
       if (page === "rwas" || page === "defi") {
         switchPage(page);
         return;
@@ -5740,6 +5764,11 @@
     async function loadMultiWalletPortfolio() {
       const render = claimRender();
       multiWalletMode = true;
+      // My Portfolio isn't the looked-up wallet: take it out of the address
+      // bar (Back still returns to it).
+      if (WalletUrl.accountFromHash(location.hash)) {
+        history.pushState(null, "", location.pathname + location.search);
+      }
       const app = document.getElementById("app");
 
       // Show loading
@@ -6682,6 +6711,17 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const input = document.getElementById("addressInput");
       const address = input.value.trim();
       if (!address) return;
+
+      // The wallet goes in the address bar (a new history entry), so a
+      // refresh keeps it, the link can be shared, and Back returns to the
+      // page before. Already there (a refresh, or Back to it): no new entry.
+      const walletHash = WalletUrl.hashForAccount(address);
+      if (walletHash && location.hash !== walletHash) {
+        history.pushState(null, "", location.pathname + location.search + walletHash);
+      } else if (!walletHash && WalletUrl.accountFromHash(location.hash)) {
+        // Not a wallet address: don't leave the previous wallet in the bar.
+        history.pushState(null, "", location.pathname + location.search);
+      }
 
       const render = claimRender();
       const app = document.getElementById("app");
