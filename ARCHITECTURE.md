@@ -17,7 +17,7 @@ step for application code, no framework, and no separate worker.
   Browser               │  Express 5 (prototype/       │       Upstreams
   ┌───────────────┐     │            server.js)        │     ┌────────────────┐
   │ public/       │◀───▶│                              │────▶│ Horizon        │
-  │  index.html   │     │  routes  ·  9 DeFi adapters  │────▶│ Soroban RPC    │
+  │  index.html   │     │  routes  · 10 DeFi adapters  │────▶│ Soroban RPC    │
   │  (one file)   │     │  pricing ·  snapshot sched.  │────▶│ CoinGecko      │
   └───────────────┘     │                              │────▶│ stellar.expert │
                         └──────────────┬───────────────┘     └────────────────┘
@@ -53,8 +53,8 @@ origin (`API_BASE = window.location.origin`) plus a handful of image hosts.
   - `snapshot-scheduler.js` — hourly-to-5-minute portfolio snapshots by tier.
   - `defi-explorer.js`, `rwa-yield-fetcher.js`, `fx-efficiency.js` — background
     refreshers behind in-memory caches.
-- **`lib/adapters/`** — nine DeFi adapters (Blend, K2, Aquarius, Templar,
-  Upshift, Sentora, Solv, plus two LP discoverers). They run in parallel under
+- **`lib/adapters/`** — ten DeFi adapters (Blend, K2, Aquarius, Templar,
+  Upshift, Sentora, Solv, Phoenix, plus two LP discoverers). They run in parallel under
   `Promise.allSettled` with a per-adapter timeout and a last-known-good cache,
   so one broken protocol degrades a single card instead of the whole portfolio.
   Every adapter exposes `{ name, protocolId, isConfigured, getPositions }`; a
@@ -141,7 +141,7 @@ No `.env` is needed. Every setting has a default, and `prototype/.env.example`
 lists all of them (a test keeps that list in step with the code). The database
 is created at `prototype/data/history.db`, which is gitignored; delete it to
 start clean. Aquarius and Solv stay off until their contract IDs are set; the
-other seven adapters need no configuration.
+other eight adapters need no configuration.
 
 Use npm 10 for anything that rewrites `package-lock.json`
 (`npx -y npm@10 install …`, `npx -y npm@10 update <pkg> --package-lock-only`).

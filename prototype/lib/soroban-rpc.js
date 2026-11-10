@@ -105,6 +105,25 @@ async function getContractData(contractId, key, durability = "persistent") {
   }
 }
 
+// getLedgerEntries takes at most 200 keys per request.
+const LEDGER_KEYS_PER_REQUEST = 200;
+
+/**
+ * Read many ledger entries at once (xdr.LedgerKey[]), retrying transient
+ * failures. Returns a Map from each key's base64 XDR to its entry; a key the
+ * ledger has no entry for is simply absent. One request instead of one
+ * simulation per key.
+ */
+async function getLedgerEntries(keys) {
+  const out = new Map();
+  for (let i = 0; i < keys.length; i += LEDGER_KEYS_PER_REQUEST) {
+    const chunk = keys.slice(i, i + LEDGER_KEYS_PER_REQUEST);
+    const res = await withRpcRetry(() => server.getLedgerEntries(...chunk), "getLedgerEntries");
+    for (const e of res?.entries || []) out.set(e.key.toXDR("base64"), e);
+  }
+  return out;
+}
+
 /**
  * Extract the stored ScVal from a getContractData() ledger entry.
  *
@@ -274,6 +293,7 @@ module.exports = {
   NETWORK_PASSPHRASE,
   simulateContractCall,
   getContractData,
+  getLedgerEntries,
   contractDataScVal,
   withRpcRetry,
   isTransientRpcError,
