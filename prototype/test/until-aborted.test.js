@@ -1,5 +1,5 @@
 // A response body that never arrives can't hold up the XLM price, a wallet's
-// Templar history, Upshift's vault list or the DeFi tab's refresh loop.
+// Templar positions, Upshift's vault list or the DeFi tab's refresh loop.
 //
 // Node's fetch can leave res.json() pending for good when the request's abort
 // signal fires just as a gzip body is arriving. Each of these keeps one shared
@@ -123,12 +123,14 @@ test("XLM price: a body that never arrives fails that refresh, and the next one 
   assert.equal(next.value.usd, 0.1701);
 });
 
-test("Templar: a history page that never arrives fails that load, not every later load of the wallet", async () => {
+test("Templar: an API answer that never arrives fails that load, not every later load of the wallet", async () => {
   const first = await whileTimeoutsFire(templar.getPositions(G, { xlmPrice: { usd: 0.17 } }));
   assert.notEqual(first, "STILL WAITING");
   assert.equal(first.error?.name, "TimeoutError", "an error: the server then serves Templar's last good result, or marks it degraded");
 
-  route = () => answer({ _embedded: { records: [] } });
+  route = (url) => answer(url.endsWith("/positions")
+    ? { data: { supplyPositions: [], borrowPositions: [], unavailable: [] } }
+    : { data: [] });
   const next = await whileTimeoutsFire(templar.getPositions(G, { xlmPrice: { usd: 0.17 } }));
   assert.deepEqual(next, { value: [] }, "read again, not waiting on the first scan");
 });

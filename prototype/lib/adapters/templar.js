@@ -1,248 +1,309 @@
 /**
- * Templar Finance Adapter for Stellar
+ * Templar Finance positions, read from Templar's own API.
  *
- * Templar's Stellar deployment uses TWO custody surfaces:
- *   - GDJ4...QBJK (classic G-address): receives collateral deposits as classic
- *     Stellar payments (e.g. 100 XLM deposit shows up as a `payment` op).
- *   - CCLW...UVAG (Soroban contract):  disburses borrowed assets as SAC token
- *     transfers (e.g. 2 USDC borrow arrives via `invoke_host_function`).
+ * Templar's lending runs on NEAR. A Stellar wallet signs in to Templar's app
+ * with a SEP-53 signed message, and its supplies and loans are held by a NEAR
+ * "universal account" whose name is derived from the wallet's address:
  *
- * The actual lending logic — interest accrual, health factor, liquidation —
- * runs off-Stellar on NEAR via Chain Signatures / MPC. So this adapter only
- * sees the on-chain principal of each leg, not live debt or accrued yield.
+ *   hex(sha256("G…"))[0..12] + ".user0.tmplr.near"
  *
- * It reads the wallet's /payments history (payments, plus the
- * invoke_host_function ops whose asset_balance_changes carry SAC transfers)
- * and nets every flow between the wallet and either custody address:
- *   - classic `payment` ops to/from the G-address  → collateral transfers
- *   - SAC transfers to/from the contract or G-address → borrow / repay
+ * (Templar's relayer, `public_key_to_account_id_slug`: the first 6 bytes of
+ * the SHA-256 of the key's display form, under the `user0.tmplr.near`
+ * registry.) Templar's public API answers, for that account, every supply and
+ * borrow position in every market, retired ones included:
  *
- * Reading the history:
- *   - Only back to Templar's launch: no record older than the G-address's
- *     first operation (11 Sep 2025) can involve Templar.
- *   - /payments, not /operations: it skips offers, trustlines and the rest,
- *     and Horizon answers it several times faster (60 pages of a busy wallet:
- *     3.8 s vs 23.7 s).
- *   - In parallel: after the first page, the rest of the history back to the
- *     launch is split into SEGMENTS ledger ranges read side by side, so a
- *     busy wallet's history takes a fraction of the time.
- *   - Incrementally: what has been read is kept per wallet (the netted flows,
- *     the newest record seen, and where each segment got to), so a later load
- *     only asks Horizon for records newer than the last one. A scan the server
- *     stops waiting for (its 8 s adapter budget) carries on in the background
- *     and the next load picks it up, instead of starting over and timing out
- *     again.
- *   - At most MAX_PAGES pages per wallet. A wallet with more history than that
- *     gets its position marked `incomplete` rather than silently netting only
- *     the recent part (the old scan stopped after 20 pages of /operations and
- *     presented whatever it had as the position).
+ *   GET https://api.templarfi.org/v1/accounts/{account}/positions
  *
- * Output: ONE position per active Templar account. When both a collateral
- * deposit and a borrow disbursement are detected, the position renders as a
- * lending position with both legs visible.
+ * with each loan's collateral and its debt (principal, fees and interest to
+ * date), and each supply's deposit, pending deposits and yield.
  *
- * Honest limitations (all need a NEAR-side query to fix):
- *   - Principal only — no accrued interest on either leg (yield.accrued null)
- *   - No health factor / liquidation buffer
- *   - No borrow APR
- *   - Multi-collateral / multi-borrow positions show only the primary
- *     (largest-USD) asset of each side; the rest are summed into its USD total
+ * This replaces netting the wallet's Stellar payments to and from Templar's
+ * custody addresses, which went wrong three ways:
+ *   - Templar's Stellar custody address also carries bridge transfers that are
+ *     not Templar positions: wallets with no Templar position showed one (one
+ *     at $2.6M), and real loans showed without their collateral.
+ *   - SDF's Horizon keeps about a year of history, and its start moves forward
+ *     every day. Deposits older than that dropped out of the sum, and a wallet
+ *     whose history reached below it failed outright (HTTP 410).
+ *   - Payments carry no interest: loans showed without the interest owed and
+ *     supplies without the yield earned.
  *
- * Adding new custody addresses: append to TEMPLAR_G_ADDRESSES (classic) or
- * TEMPLAR_C_ADDRESSES (Soroban contract).
+ * Each Templar position becomes one "vault" position:
+ *   - a supply: deposited = active deposit + pending deposits + any payout in
+ *     transit; yield = interest earned and not yet harvested; value = both.
+ *   - a loan: deposited = the collateral (and any collateral in transit);
+ *     borrow = the debt (principal + fees + interest), what a full repay needs;
+ *     value = collateral − debt.
+ * Amounts that would show as 0 at six decimals (a 1-unit leftover) are left
+ * out.
+ *
+ * Prices: a Stellar asset (Templar's id carries its Stellar contract) is priced
+ * like everywhere else on the site, XLM at the request's XLM price. An asset
+ * the site has no price for (BTC, ZEC, XRP… bridged from other chains) takes
+ * the USD value Templar's API gives for that leg (its oracle price).
+ *
+ * Failures: the API refusing, a market Templar couldn't read for this account
+ * (`unavailable`), a token whose decimals aren't listed, or more requests than
+ * Templar's rate limit allows just now all throw, so the server serves
+ * Templar's last good result or shows Templar as unavailable, never a smaller
+ * position.
  */
-
+const { StrKey } = require("@stellar/stellar-sdk");
+const crypto = require("crypto");
 const pricing = require("../pricing-engine");
 const { untilAborted } = require("../until-aborted");
 
-const TEMPLAR_G_ADDRESSES = new Set([
-  "GDJ4JZXZELZD737NVFORH4PSSQDWFDZTKW3AIDKHYQG23ZXBPDGGQBJK",
-]);
+const TEMPLAR_API = "https://api.templarfi.org/v1";
+const UA_REGISTRY = "user0.tmplr.near";
+const XLM_SAC = "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA";
 
-const TEMPLAR_C_ADDRESSES = new Set([
-  "CCLWL5NYSV2WJQ3VBU44AMDHEVKEPA45N2QP2LL62O3JVKPGWWAQUVAG",
-]);
+const FETCH_TIMEOUT_MS = 7_000; // inside the server's 8 s adapter budget
+const POSITIONS_TTL_MS = 5 * 60_000; // one wallet's positions
+const META_TTL_MS = 60 * 60_000; // assets and market names
 
-const HORIZON_BASE = process.env.HORIZON_URL || "https://horizon.stellar.org";
+// Templar's API allows a burst of about 40 requests, then about one a second
+// (measured 2026-11-11: at 3 a second the 43rd got 429, then 2 in 3 did), and
+// answers 429 with Retry-After: 60. So: at most 4 requests at once, and a
+// bucket of 20 refilled at one a second. A read that would wait more than 5 s
+// for its turn fails instead (the server then serves Templar's last good
+// result), and a 429 empties the bucket.
+const MAX_IN_FLIGHT = 4;
+let BUCKET_SIZE = 20;
+let REFILL_PER_SEC = 1;
+let MAX_WAIT_MS = 5_000;
 
-// The id of the G-address's first operation (ledger 58879169, 11 Sep 2025).
-// History older than this cannot involve Templar.
-const TEMPLAR_FIRST_OP = 252884105270833153n;
+let _inFlight = 0;
+const _queue = [];
+let _tokens = BUCKET_SIZE;
+let _refilledAt = Date.now();
+const _positions = new Map(); // account -> { at, data } | { pending }
+let _assets = null; // { at, byId: Map }
+let _markets = null; // { at, byId: Map }
+let _assetsLoad = null;
+let _marketsLoad = null;
 
-const PAGE_SIZE = 200;
-// Most pages of history read for one wallet (60,000 records). The busiest
-// Templar depositor seen had 15,915 since launch (80 pages).
-const MAX_PAGES = 300;
-const SEGMENTS = 8;
-// A wallet's history is re-checked for new records at most this often.
-const REFRESH_MS = 30_000;
-const MAX_WALLETS = 2000;
-const FETCH_TIMEOUT_MS = 10_000;
+/** The NEAR account Templar keeps a Stellar wallet's positions under, or null for a non-G address. */
+function templarAccount(address) {
+  if (!StrKey.isValidEd25519PublicKey(String(address || ""))) return null;
+  return crypto.createHash("sha256").update(address).digest("hex").slice(0, 12) + "." + UA_REGISTRY;
+}
 
-// wallet → { flows, newest, segments, complete, pages, refreshedAt, inFlight }
-const _wallets = new Map();
+/**
+ * The Stellar contract behind one of Templar's HOT-bridge asset ids, or null.
+ * `nep245:v2_1.omni.hot.tg:1100_<base58>`: 1100 is Stellar's chain number and
+ * the base58 is an XDR ScVal address (0x12, then 0x01 for a contract) + 32 bytes.
+ */
+function stellarContractOf(assetId) {
+  const m = /^nep245:[^:]+:1100_([1-9A-HJ-NP-Za-km-z]+)$/.exec(String(assetId || ""));
+  if (!m) return null;
+  const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let n = 0n;
+  for (const ch of m[1]) n = n * 58n + BigInt(ALPHABET.indexOf(ch));
+  const hex = n.toString(16).padStart(80, "0");
+  if (hex.length !== 80 || !hex.startsWith("0000001200000001")) return null;
+  return StrKey.encodeContract(Buffer.from(hex.slice(16), "hex"));
+}
 
-async function _fetchJson(url) {
+/** Wait for the rate limit's next turn; throws if that's more than MAX_WAIT_MS away. */
+async function _turn() {
+  const start = Date.now();
+  for (;;) {
+    const now = Date.now();
+    _tokens = Math.min(BUCKET_SIZE, _tokens + ((now - _refilledAt) / 1000) * REFILL_PER_SEC);
+    _refilledAt = now;
+    if (_tokens >= 1) { _tokens -= 1; return; }
+    const wait = Math.ceil(((1 - _tokens) / REFILL_PER_SEC) * 1000);
+    if (now - start + wait > MAX_WAIT_MS) throw new Error("Templar API busy: too many requests for now");
+    await new Promise((r) => setTimeout(r, wait));
+  }
+}
+
+async function _slot() {
+  if (_inFlight < MAX_IN_FLIGHT) { _inFlight++; return; }
+  await new Promise((resolve) => _queue.push(resolve));
+}
+function _release() {
+  const next = _queue.shift();
+  if (next) next(); else _inFlight--;
+}
+
+async function _getOnce(url) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  const t = setTimeout(() => ctrl.abort(new DOMException("Templar API timed out", "TimeoutError")), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
-    if (!res.ok) throw new Error(`Horizon HTTP ${res.status}`);
-    // A page whose body never settled would hold this wallet's scan, which
-    // every later load of the wallet waits on, for good.
+    const res = await fetch(url, { signal: ctrl.signal, headers: { accept: "application/json" } });
+    if (!res.ok) {
+      const e = new Error(`Templar API HTTP ${res.status}`);
+      e.status = res.status;
+      throw e;
+    }
+    // A body that never settled would hold this wallet's read, which every
+    // later load of the wallet waits on, for good.
     return await untilAborted(res.json(), ctrl.signal);
   } finally {
     clearTimeout(t);
   }
 }
 
-async function _page(user, order, cursor) {
-  const url = `${HORIZON_BASE}/accounts/${user}/payments?order=${order}&limit=${PAGE_SIZE}` +
-    `&include_failed=false${cursor ? `&cursor=${cursor}` : ""}`;
-  const data = await _fetchJson(url);
-  return data?._embedded?.records || [];
-}
-
-/** "123.4500000" → 1234500000n (stroops), so sums are exact. */
-function _stroops(amount) {
-  const [whole, frac = ""] = String(amount || "0").split(".");
-  return BigInt(whole || "0") * 10_000_000n + BigInt((frac + "0000000").slice(0, 7));
-}
-
-function _flow(flows, code, issuer) {
-  const key = `${code}:${issuer || "native"}`;
-  if (!flows.has(key)) flows.set(key, { code, issuer, sent: 0n, received: 0n });
-  return flows.get(key);
-}
-
-/** Add one /payments record's flows between `user` and Templar. */
-function _apply(flows, user, op) {
-  if (op.type === "payment") {
-    const isToTemplar = TEMPLAR_G_ADDRESSES.has(op.to);
-    const isFromTemplar = TEMPLAR_G_ADDRESSES.has(op.from);
-    if (!isToTemplar && !isFromTemplar) return;
-    const amount = _stroops(op.amount);
-    if (amount <= 0n) return;
-    const native = op.asset_type === "native";
-    const f = _flow(flows, native ? "XLM" : op.asset_code, native ? null : op.asset_issuer);
-    if (isToTemplar && op.from === user) f.sent += amount;
-    else if (isFromTemplar && op.to === user) f.received += amount;
-  } else if (op.type === "invoke_host_function") {
-    for (const change of op.asset_balance_changes || []) {
-      if (change.type !== "transfer") continue;
-      const { from, to } = change;
-      const isToTemplar = TEMPLAR_C_ADDRESSES.has(to) || TEMPLAR_G_ADDRESSES.has(to);
-      const isFromTemplar = TEMPLAR_C_ADDRESSES.has(from) || TEMPLAR_G_ADDRESSES.has(from);
-      if (!isToTemplar && !isFromTemplar) continue;
-      if (from !== user && to !== user) continue;
-      const amount = _stroops(change.amount);
-      if (amount <= 0n) continue;
-      const native = change.asset_type === "native";
-      const f = _flow(flows, native ? "XLM" : change.asset_code, native ? null : change.asset_issuer);
-      if (isToTemplar && from === user) f.sent += amount;
-      else if (isFromTemplar && to === user) f.received += amount;
+/** GET a Templar API path within the rate limit; a 429 or 5xx is asked once more. */
+async function _get(path) {
+  await _turn();
+  await _slot();
+  try {
+    try {
+      return await _getOnce(TEMPLAR_API + path);
+    } catch (e) {
+      if (!(e.status === 429 || e.status >= 500)) throw e;
+      if (e.status === 429) _tokens = 0;
+      await _turn();
+      return await _getOnce(TEMPLAR_API + path);
     }
+  } finally {
+    _release();
   }
 }
 
-/**
- * Read one stretch of history, newest first: records below `seg.next` down to
- * (and including) `seg.lower`. Progress is kept in `seg`, so an interrupted
- * stretch resumes where it stopped.
- */
-async function _readSegment(user, w, seg) {
-  while (!seg.done && w.pages < MAX_PAGES) {
-    w.pages++;
-    const records = await _page(user, "desc", seg.next);
-    for (const op of records) {
-      if (BigInt(op.paging_token) < seg.lower) { seg.done = true; break; }
-      _apply(w.flows, user, op);
-      seg.next = op.paging_token;
-    }
-    if (records.length < PAGE_SIZE) seg.done = true;
+/** Templar's assets by id (symbol, decimals). Kept an hour; `fresh` reloads them. */
+async function _assetsById(fresh = false) {
+  if (!fresh && _assets && Date.now() - _assets.at < META_TTL_MS) return _assets.byId;
+  if (!_assetsLoad) {
+    _assetsLoad = _get("/assets")
+      .then((body) => {
+        const list = body?.data;
+        if (!Array.isArray(list)) throw new Error("Templar API: unexpected /assets answer");
+        _assets = { at: Date.now(), byId: new Map(list.map((a) => [a.assetId, a])) };
+        return _assets.byId;
+      })
+      .finally(() => { _assetsLoad = null; });
   }
+  return _assetsLoad;
 }
 
-async function _scan(user, w) {
-  // 1. Records newer than the newest one already read.
-  if (w.newest) {
-    for (let i = 0; i < MAX_PAGES; i++) {
-      const records = await _page(user, "asc", w.newest);
-      for (const op of records) _apply(w.flows, user, op);
-      if (records.length) w.newest = records[records.length - 1].paging_token;
-      if (records.length < PAGE_SIZE) break;
-    }
+/** Market names ("XLM/USDC") by market id. Only for labels: a failure leaves the id. */
+async function _marketNames() {
+  if (_markets && Date.now() - _markets.at < META_TTL_MS) return _markets.byId;
+  if (!_marketsLoad) {
+    _marketsLoad = _get("/markets?status=all&limit=100")
+      .then((body) => {
+        const list = Array.isArray(body?.data) ? body.data : [];
+        _markets = { at: Date.now(), byId: new Map(list.map((m) => [m.marketId, m.name])) };
+        return _markets.byId;
+      })
+      .catch(() => (_markets ? _markets.byId : new Map()))
+      .finally(() => { _marketsLoad = null; });
   }
+  return _marketsLoad;
+}
 
-  // 2. First load: the newest page tells whether there is more history.
-  if (!w.segments) {
-    const top = { next: null, lower: TEMPLAR_FIRST_OP, done: false };
-    w.pages++;
-    const records = await _page(user, "desc", null);
-    if (records.length) w.newest = records[0].paging_token;
-    for (const op of records) {
-      if (BigInt(op.paging_token) < top.lower) { top.done = true; break; }
-      _apply(w.flows, user, op);
-      top.next = op.paging_token;
-    }
-    if (records.length < PAGE_SIZE) top.done = true;
-    w.segments = [];
-    if (!top.done) {
-      // Split what's left, back to the launch, into ledger ranges. An
-      // operation id is (ledger << 32) | ..., so ledger L starts at L << 32.
-      const low = TEMPLAR_FIRST_OP >> 32n;
-      const high = BigInt(top.next) >> 32n;
-      const n = BigInt(SEGMENTS);
-      for (let i = 0n; i < n; i++) {
-        const lower = i === 0n ? TEMPLAR_FIRST_OP : (low + ((high - low) * i) / n) << 32n;
-        const next = i === n - 1n ? top.next : String((low + ((high - low) * (i + 1n)) / n) << 32n);
-        if (BigInt(next) > lower) w.segments.push({ next, lower, done: false });
+/** The account's positions, kept a minute; loads of one wallet at the same time share one read. */
+async function _accountPositions(account) {
+  const hit = _positions.get(account);
+  if (hit?.data && Date.now() - hit.at < POSITIONS_TTL_MS) return hit.data;
+  if (hit?.pending) return hit.pending;
+  const pending = _get(`/accounts/${encodeURIComponent(account)}/positions`)
+    .then((body) => {
+      const d = body?.data;
+      if (!d || !Array.isArray(d.supplyPositions) || !Array.isArray(d.borrowPositions)) {
+        throw new Error("Templar API: unexpected positions answer");
       }
-    }
-  }
-
-  // A wallet with no records yet: look again next time.
-  if (!w.newest) w.segments = null;
-
-  // 3. Older history, the segments side by side.
-  const segments = w.segments || [];
-  const results = await Promise.allSettled(
-    segments.filter((seg) => !seg.done).map((seg) => _readSegment(user, w, seg))
-  );
-  w.complete = segments.every((seg) => seg.done);
-  const failed = results.find((r) => r.status === "rejected");
-  if (failed) throw failed.reason;
-  w.refreshedAt = Date.now();
+      if (Array.isArray(d.unavailable) && d.unavailable.length) {
+        const which = d.unavailable.map((u) => `${u.marketId} (${u.side})`).join(", ");
+        throw new Error(`Templar couldn't read this account's position in ${which}`);
+      }
+      _positions.set(account, { at: Date.now(), data: d });
+      return d;
+    })
+    .catch((e) => { _positions.delete(account); throw e; });
+  _positions.set(account, { pending });
+  while (_positions.size > 2000) _positions.delete(_positions.keys().next().value);
+  return pending;
 }
 
-/** The wallet's netted Templar flows, read or brought up to date. */
-async function _walletFlows(user) {
-  let w = _wallets.get(user);
-  if (w) {
-    _wallets.delete(user); // most recently used goes last
-  } else {
-    w = { flows: new Map(), newest: null, segments: null, complete: false, pages: 0, refreshedAt: 0, inFlight: null };
-  }
-  _wallets.set(user, w);
-  while (_wallets.size > MAX_WALLETS) _wallets.delete(_wallets.keys().next().value);
-
-  const olderPending = !w.complete && w.pages < MAX_PAGES;
-  const fresh = !olderPending && Date.now() - w.refreshedAt < REFRESH_MS;
-  if (!fresh && !w.inFlight) {
-    w.inFlight = _scan(user, w).finally(() => { w.inFlight = null; });
-  }
-  if (w.inFlight) await w.inFlight;
-  return w;
-}
-
-async function _priceUSD(code, issuer, priceCtx) {
-  if (code === "XLM" && !issuer) return priceCtx?.xlmPrice?.usd || 0;
-  const p = await pricing.priceClassicAsset(null, code, issuer);
-  return p && p.usd > 0 ? p.usd : 0;
+/** Raw integer string -> number of tokens. */
+function _units(raw, decimals) {
+  const s = BigInt(raw || 0).toString().padStart(decimals + 1, "0");
+  return Number(decimals > 0 ? `${s.slice(0, -decimals)}.${s.slice(-decimals)}` : s);
 }
 
 function _fmt(amount) {
   return amount.toFixed(amount < 1 ? 6 : 2);
+}
+
+/**
+ * USD per token: the site's price for a Stellar asset, else the one implied by
+ * Templar's own USD figure for this leg (usd / amount), else null.
+ */
+async function _unitPrice(asset, amount, templarUsd, priceCtx) {
+  const contract = stellarContractOf(asset.assetId);
+  if (contract === XLM_SAC && priceCtx?.xlmPrice?.usd > 0) return priceCtx.xlmPrice.usd;
+  if (contract) {
+    const p = await pricing.priceSorobanToken(contract, { decimals: asset.decimals }).catch(() => null);
+    if (p && p.usd > 0) return p.usd;
+  }
+  if (amount > 0 && Number.isFinite(templarUsd) && templarUsd > 0) return templarUsd / amount;
+  return null;
+}
+
+async function _asset(byId, assetId) {
+  let a = byId.get(assetId);
+  if (!a) a = (await _assetsById(true)).get(assetId); // a token listed since the last load
+  const decimals = Number(a?.decimals);
+  if (!a || !Number.isInteger(decimals) || decimals < 0 || decimals > 77) {
+    throw new Error(`Templar API: no decimals for ${assetId}`);
+  }
+  return { assetId, symbol: String(a.symbol || "?"), decimals };
+}
+
+const _tiny = (n) => n < 5e-7; // shows as 0.000000
+
+async function _supplyPosition(p, byId, names, priceCtx) {
+  const asset = await _asset(byId, p.assetId);
+  const deposited = _units(BigInt(p.balance || 0) + BigInt(p.pendingDepositsTotal || 0) + BigInt(p.outgoing || 0), asset.decimals);
+  const earned = _units(p.interestEarned, asset.decimals);
+  if (_tiny(deposited) && _tiny(earned)) return null;
+  const active = _units(p.balance, asset.decimals);
+  const price = await _unitPrice(asset, active, p.balanceUsd, priceCtx)
+    ?? await _unitPrice(asset, earned, p.interestEarnedUsd, priceCtx);
+  const market = names.get(p.marketId) || p.marketId;
+  const pos = {
+    protocol: "templar",
+    type: "vault",
+    subtype: "supply",
+    contractId: p.marketId,
+    vaultName: `Templar · ${asset.symbol} supplied to ${market}`,
+    receiptSymbol: asset.symbol,
+    deposited: { amount: _fmt(deposited), asset: asset.symbol },
+    yield: { accrued: _fmt(earned), asset: asset.symbol, apy: Number.isFinite(p.apy) ? p.apy * 100 : null },
+    valueUSD: price == null ? 0 : (deposited + earned) * price,
+  };
+  if (price == null) pos.unpriced = true;
+  return pos;
+}
+
+async function _borrowPosition(p, byId, names, priceCtx) {
+  const [coll, bor] = await Promise.all([_asset(byId, p.collateralAssetId), _asset(byId, p.assetId)]);
+  const collateral = _units(BigInt(p.collateral || 0) + BigInt(p.collateralInFlight || 0), coll.decimals);
+  const debt = _units(p.debt, bor.decimals);
+  if (_tiny(collateral) && _tiny(debt)) return null;
+  const [pc, pb] = await Promise.all([
+    _unitPrice(coll, _units(p.collateral, coll.decimals), p.collateralUsd, priceCtx),
+    _unitPrice(bor, debt, p.debtUsd, priceCtx),
+  ]);
+  const debtUSD = pb == null ? 0 : debt * pb;
+  const pos = {
+    protocol: "templar",
+    type: "vault",
+    subtype: "borrow",
+    contractId: p.marketId,
+    vaultName: `Templar · ${names.get(p.marketId) || `${coll.symbol}/${bor.symbol}`} loan`,
+    receiptSymbol: coll.symbol,
+    deposited: { amount: _fmt(collateral), asset: coll.symbol },
+    borrow: { amount: _fmt(debt), asset: bor.symbol, valueUSD: debtUSD, apy: Number.isFinite(p.apy) ? p.apy * 100 : null },
+    yield: { accrued: null, asset: bor.symbol, apy: null },
+    valueUSD: (pc == null ? 0 : collateral * pc) - debtUSD,
+  };
+  if (pc == null || pb == null) pos.unpriced = true;
+  return pos;
 }
 
 const TemplarAdapter = {
@@ -251,76 +312,47 @@ const TemplarAdapter = {
   type: "lending",
 
   isConfigured() {
-    return TEMPLAR_G_ADDRESSES.size > 0 || TEMPLAR_C_ADDRESSES.size > 0;
+    return true;
   },
 
   async getPositions(userAddress, priceCtx) {
-    if (!this.isConfigured()) return [];
-
-    // Horizon errors propagate: the server then serves this adapter's last
-    // good result (or marks it degraded) instead of a half-read position.
-    const w = await _walletFlows(userAddress);
-
-    // Split per-asset nets into collateral (net flow into Templar) and
-    // borrows (net flow out to user without prior matching deposit).
-    const collateral = [];
-    const borrows = [];
-    for (const [, f] of w.flows) {
-      const net = f.sent - f.received;
-      if (net === 0n) continue;
-      const amount = Number(net < 0n ? -net : net) / 1e7;
-      const usd = amount * await _priceUSD(f.code, f.issuer, priceCtx);
-      (net > 0n ? collateral : borrows).push({ code: f.code, amount, usd });
-    }
-
-    if (collateral.length === 0 && borrows.length === 0) return [];
-
-    // Sort by USD so the primary asset of each side is well-defined; the
-    // remaining same-side assets are summed into the totals but only the
-    // primary asset is rendered as the label (UI limitation we accept).
-    collateral.sort((a, b) => b.usd - a.usd);
-    borrows.sort((a, b) => b.usd - a.usd);
-    const primaryCol = collateral[0] || null;
-    const primaryBor = borrows[0] || null;
-    const collateralUSD = collateral.reduce((s, c) => s + c.usd, 0);
-    const borrowUSD = borrows.reduce((s, b) => s + b.usd, 0);
-
-    const position = {
-      protocol: "templar",
-      type: "vault",
-      contractId: null,
-      vaultName: primaryBor && primaryCol
-        ? "Templar lending position"
-        : `Templar ${(primaryCol || primaryBor).code} deposit`,
-      receiptSymbol: (primaryCol || primaryBor).code,
-      deposited: primaryCol ? {
-        amount: _fmt(primaryCol.amount),
-        asset: primaryCol.code,
-      } : null,
-      yield: {
-        accrued: null, // principal only: interest lives on NEAR
-        asset: (primaryCol || primaryBor).code,
-        apy: null,
-      },
-      valueUSD: collateralUSD - borrowUSD,
-    };
-
-    if (primaryBor) {
-      position.borrow = {
-        amount: _fmt(primaryBor.amount),
-        asset: primaryBor.code,
-        valueUSD: borrowUSD,
-      };
-    }
-    if (!w.complete) position.incomplete = true;
-
-    return [position];
+    const account = templarAccount(userAddress);
+    if (!account) return [];
+    // Positions, asset list and market names at the same time; only the
+    // first two can fail the read.
+    const [data, byId, names] = await Promise.all([_accountPositions(account), _assetsById(), _marketNames()]);
+    const built = await Promise.all([
+      ...data.supplyPositions.map((p) => _supplyPosition(p, byId, names, priceCtx)),
+      ...data.borrowPositions.map((p) => _borrowPosition(p, byId, names, priceCtx)),
+    ]);
+    const positions = built.filter(Boolean);
+    for (const p of positions) p.templarAccount = account;
+    return positions;
   },
 };
 
 function _resetForTests() {
-  _wallets.clear();
+  _positions.clear();
+  _assets = null;
+  _markets = null;
+  _assetsLoad = null;
+  _marketsLoad = null;
+  _inFlight = 0;
+  _queue.length = 0;
+  _tokens = BUCKET_SIZE;
+  _refilledAt = Date.now();
+}
+
+function _setLimitsForTests({ bucketSize, refillPerSec, maxWaitMs }) {
+  BUCKET_SIZE = bucketSize;
+  REFILL_PER_SEC = refillPerSec;
+  MAX_WAIT_MS = maxWaitMs;
+  _tokens = BUCKET_SIZE;
+  _refilledAt = Date.now();
 }
 
 module.exports = TemplarAdapter;
+module.exports.templarAccount = templarAccount;
+module.exports.stellarContractOf = stellarContractOf;
 module.exports._resetForTests = _resetForTests;
+module.exports._setLimitsForTests = _setLimitsForTests;
