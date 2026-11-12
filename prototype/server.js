@@ -13,6 +13,7 @@ const pricingEngine = require("./lib/pricing-engine");
 const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
+const AquariusLocksAdapter = require("./lib/adapters/aquarius-locks");
 const TemplarAdapter = require("./lib/adapters/templar");
 const UpshiftAdapter = require("./lib/adapters/upshift");
 const LPPositionsAdapter = require("./lib/adapters/lp-positions");
@@ -159,6 +160,7 @@ const PROTOCOL_ADAPTERS = [
   BlendAdapter,
   K2Adapter,
   AquariusAdapter,
+  AquariusLocksAdapter,
   TemplarAdapter,
   SolvProtocolAdapter,
   UpshiftAdapter,

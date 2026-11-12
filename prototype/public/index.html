@@ -1501,6 +1501,7 @@
     .defi-type-badge.concentrated_lp { background: rgba(99,102,241,0.15); color: var(--accent-light); }
     .defi-type-badge.vault { background: rgba(34,197,94,0.15); color: var(--green); }
     .defi-type-badge.staking { background: rgba(234,179,8,0.15); color: var(--yellow); }
+    .defi-type-badge.locked { background: rgba(234,179,8,0.15); color: var(--yellow); }
     .defi-type-badge.lp { background: rgba(59,130,246,0.15); color: var(--blue); }
     .defi-type-badge.lending { background: rgba(16,185,129,0.15); color: var(--green); }
 
@@ -7242,6 +7243,43 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div class="defi-detail-value">${pos.yield.apy ? fmt(pos.yield.apy) + "%" : "—"}</div>
             </div>
           `;
+        } else if (pos.type === "locked") {
+          // AQUA locked for ICE: claimable balances only this wallet can
+          // claim, each once its unlock date has passed. In Value, as the
+          // wallet's own AQUA; once claimed it's in the AQUA balance instead.
+          const asset = escapeHtml(pos.staked.asset);
+          const locked = fmt(Number(pos.staked.amount), 2);
+          const unlocked = Number(pos.unlocked || 0);
+          const unlockedText = unlocked > 0 ? `${fmt(unlocked, 2)} ${asset}` : "—";
+          const nextUnlockText = pos.nextUnlock
+            ? escapeHtml(new Date(pos.nextUnlock).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" }))
+            : "—";
+          html += `
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">Locked</div>
+              <div class="defi-detail-value">${locked} ${asset}</div>
+            </div>
+            <div class="defi-detail-item" title="Past its unlock date and not claimed yet. It stays out of the wallet's AQUA balance until it's claimed.">
+              <div class="defi-detail-label">Unlocked, not claimed</div>
+              <div class="defi-detail-value">${unlockedText}</div>
+            </div>
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">Next unlock</div>
+              <div class="defi-detail-value">${nextUnlockText}</div>
+            </div>
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">Locks</div>
+              <div class="defi-detail-value">${fmt(pos.lockCount, 0)}</div>
+            </div>
+          `;
+          // With a price, the Value row below shows it.
+          if (pos.unpriced) {
+            html += `
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">Value</div>
+              <div class="defi-detail-value"><span class="unpriced">No price</span></div>
+            </div>`;
+          }
         } else if (pos.type === "staking") {
           html += `
             <div class="defi-detail-item">
