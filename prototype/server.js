@@ -18,6 +18,7 @@ const UpshiftAdapter = require("./lib/adapters/upshift");
 const LPPositionsAdapter = require("./lib/adapters/lp-positions");
 const LPDiscoveryAdapter = require("./lib/adapters/lp-discovery");
 const SentoraAdapter = require("./lib/adapters/sentora");
+const PhoenixAdapter = require("./lib/adapters/phoenix");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const rwaYieldFetcher = require("./lib/rwa-yield-fetcher");
 const K2Adapter = require("./lib/adapters/k2");
@@ -155,6 +156,7 @@ const horizon = getHorizon();
 // Soroswap (factory enumeration). LPPositionsAdapter reads SushiSwap V3
 // positions from the position-manager contract and keeps a hardcoded-pool
 // fallback for anything discovery misses (e.g. nascent protocols).
+// PhoenixAdapter reads every Phoenix pool from its factory.
 const PROTOCOL_ADAPTERS = [
   BlendAdapter,
   K2Adapter,
@@ -163,6 +165,7 @@ const PROTOCOL_ADAPTERS = [
   SolvProtocolAdapter,
   UpshiftAdapter,
   SentoraAdapter,
+  PhoenixAdapter,
   LPDiscoveryAdapter,
   LPPositionsAdapter,
 ];

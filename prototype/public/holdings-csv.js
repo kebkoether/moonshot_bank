@@ -25,7 +25,7 @@
   const VENUES = {
     blend: "Blend", k2: "K2 Lend", aquarius: "Aquarius", soroswap: "Soroswap",
     "sushiswap-v3": "SushiSwap V3", upshift: "Upshift", sentora: "Stellar DeFi Hub (Sentora)",
-    templar: "Templar Finance", "solv-protocol": "Solv Protocol",
+    templar: "Templar Finance", "solv-protocol": "Solv Protocol", phoenix: "Phoenix",
   };
 
   /** A text cell: never the start of a formula (=, +, -, @, tab, CR). */
@@ -111,7 +111,14 @@
     const pair = p.token0 && p.token1 ? `${p.token0.symbol}/${p.token1.symbol}` : "";
     const position = p.poolName || p.vaultName || pair;
     const notes = [];
-    if (p.unpriced) notes.push("no price");
+    if (p.unpriced) {
+      // An LP with one unpriced side: value_usd is the other side only.
+      const which = Array.isArray(p.unpricedTokens) ? p.unpricedTokens.join(", ") : "";
+      notes.push(which ? `no price for ${which}: not in value_usd` : "no price");
+    }
+    if (p.lpShares && Number(p.lpShares.staked) > 0) {
+      notes.push(Number(p.lpShares.held) > 0 ? "some of the pool shares are staked" : "the pool shares are staked");
+    }
     if (p.deposited && p.yield && p.yield.asset === p.deposited.asset && Number(p.yield.accrued) > 0) {
       notes.push(`includes ${num(p.yield.accrued)} ${p.yield.asset} of yield on ${num(p.deposited.amount)} deposited`);
     }

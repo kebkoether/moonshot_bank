@@ -6674,7 +6674,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
     const TIME_TRAVEL_PROTOCOL_NAMES = {
       blend: "Blend", k2: "K2 Lend", templar: "Templar Finance", upshift: "Upshift",
       sentora: "Stellar DeFi Hub (Sentora)", aquarius: "Aquarius", soroswap: "Soroswap",
-      "sushiswap-v3": "SushiSwap V3", "solv-protocol": "Solv Protocol",
+      "sushiswap-v3": "SushiSwap V3", "solv-protocol": "Solv Protocol", phoenix: "Phoenix",
     };
     function renderTimeTravelDefi(snap) {
       const positions = snap.defiPositions || [];
@@ -7163,6 +7163,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           : pos.protocol === "aquarius" ? "aqua"
           : pos.protocol === "soroswap" ? "soroswap"
           : pos.protocol === "sentora" ? "sentora"
+          : pos.protocol === "phoenix" ? "phoenix"
           : pos.protocol === "templar" ? "templar" : "default";
         const protocolLabel = pos.protocol === "sushiswap-v3" ? (pos.poolName || "SushiSwap V3")
           : pos.protocol === "solv-protocol" ? "Solv Protocol"
@@ -7170,6 +7171,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           : pos.protocol === "aquarius" ? (pos.poolName || "Aquarius")
           : pos.protocol === "soroswap" ? (pos.poolName || "Soroswap")
           : pos.protocol === "sentora" ? (pos.vaultName ? `Stellar DeFi Hub · ${pos.vaultName}` : "Stellar DeFi Hub (Sentora)")
+          : pos.protocol === "phoenix" ? "Phoenix"
           : pos.protocol === "templar" ? (pos.vaultName || "Templar Finance") : pos.protocol;
         const typeLabel = pos.type.replace(/_/g, " ");
 
@@ -7271,8 +7273,28 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               ${apyHtml}
             </div>
           `;
-          // Rewards waiting to be claimed (Aquarius). Not part of Value until
-          // claimed. undefined: none for this protocol; null: couldn't be read.
+          // Phoenix: pool shares bonded in the pool's stake contract. They're
+          // already in the amounts above and in Value.
+          const sharesHeld = Number(pos.lpShares?.held || 0);
+          const sharesStaked = Number(pos.lpShares?.staked || 0);
+          if (sharesStaked > 0) {
+            const pct = Math.min(99, Math.max(1, Math.round((sharesStaked / (sharesHeld + sharesStaked)) * 100)));
+            html += `
+            <div class="defi-detail-item" title="Pool shares bonded in the stake contract to earn rewards. Included in the amounts and Value.">
+              <div class="defi-detail-label">Staked</div>
+              <div class="defi-detail-value">${sharesHeld > 0 ? `${pct}% of shares` : "All shares"}</div>
+            </div>`;
+          }
+          // A side of the pool with no price isn't in Value.
+          if (Array.isArray(pos.unpricedTokens) && pos.unpricedTokens.length > 0) {
+            html += `
+            <div class="defi-detail-item" title="No price for this token, so its side of the pool isn't included in Value.">
+              <div class="defi-detail-label">Not in Value</div>
+              <div class="defi-detail-value"><span class="unpriced">${pos.unpricedTokens.map((s) => escapeHtml(s)).join(", ")}: no price</span></div>
+            </div>`;
+          }
+          // Rewards waiting to be claimed (Aquarius, Phoenix). Not part of Value
+          // until claimed. undefined: none for this protocol; null: couldn't be read.
           if (pos.unclaimedRewards === null) {
             html += `
             <div class="defi-detail-item" title="Couldn't be read this time. Refresh to try again.">
