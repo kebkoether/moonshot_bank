@@ -127,9 +127,29 @@ const CG_BATCH_WINDOW_MS = 25;
 // the old Freighter XLM feed went wrong for weeks.
 const CG_MAX_STALE_MS = 15 * 60 * 1000;
 
+// CoinGecko goes on answering for a coin it has stopped tracking: /simple/price
+// returns the last price it had, however old. On 2026-11-12, 13 of the ids
+// the site maps were frozen 40 to 316 days back (12 of them delisted), and
+// served as live prices: VNX's euro (VEUR) at $0.29 since 21 June 2026,
+// YieldBlox at $0.19, Glitzkoin, MOBI, NWC... A coin CoinGecko tracks is
+// minutes old (the oldest seen: 21 hours), so a price CoinGecko last updated
+// more than CG_FROZEN_AFTER_MS ago is not used: the asset falls through to
+// the order books and pools, as if CoinGecko had no id for it. That is an
+// answer, not a miss, so the "no price" that may follow is cached as usual.
+const CG_FROZEN_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
+const CG_FROZEN = Symbol("coingecko-frozen");
+
+/** CoinGecko's /simple/price entry (asked with include_last_updated_at) is a live price. */
+function coingeckoIsLive(entry, now = Date.now()) {
+  if (!entry || !(entry.usd > 0)) return false;
+  const at = Number(entry.last_updated_at); // seconds
+  return !(at > 0 && now - at * 1000 > CG_FROZEN_AFTER_MS);
+}
+
 function _coingeckoPrice(coingeckoId) {
   if (!coingeckoId) return Promise.resolve(null);
   return _coingeckoBatched(coingeckoId).then((r) => {
+    if (r === CG_FROZEN) return null;
     const run = pricingRun.getStore();
     if (!r && run) run.coingeckoMissed = true;
     return r;
@@ -158,7 +178,7 @@ async function _flushCoingeckoBatch() {
   let data = {};
   try {
     const ids = [...queue.keys()].join(",");
-    const url = `${COINGECKO_API}/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true`;
+    const url = `${COINGECKO_API}/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true`;
     const res = await fetch(url);
     if (res.ok) data = await res.json();
     // Non-ok (429/5xx) leaves data empty → per-id stale fallback below.
@@ -169,9 +189,12 @@ async function _flushCoingeckoBatch() {
   for (const [id, resolvers] of queue) {
     const entry = data[id];
     let out;
-    if (entry && entry.usd) {
+    if (coingeckoIsLive(entry)) {
       out = { usd: entry.usd, change24h: entry.usd_24h_change || 0, ts: Date.now() };
       cgPriceCache.set(id, out);
+    } else if (entry && entry.usd) {
+      out = CG_FROZEN; // CoinGecko answered with a price it no longer updates
+      cgPriceCache.delete(id);
     } else {
       // A recent price is much better than zeroing out a position, but it
       // says it is stale, and it isn't served forever (CG_MAX_STALE_MS).
@@ -209,13 +232,13 @@ async function primeKnownPrices() {
     try {
       const ids = priceMap.allCoingeckoIds();
       if (ids.length === 0) return;
-      const url = `${COINGECKO_API}/simple/price?ids=${encodeURIComponent(ids.join(","))}&vs_currencies=usd&include_24hr_change=true`;
+      const url = `${COINGECKO_API}/simple/price?ids=${encodeURIComponent(ids.join(","))}&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true`;
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
       const now = Date.now();
       for (const [id, entry] of Object.entries(data)) {
-        if (entry && entry.usd) {
+        if (coingeckoIsLive(entry, now)) {
           cgPriceCache.set(id, { usd: entry.usd, change24h: entry.usd_24h_change || 0, ts: now });
         }
       }
@@ -433,6 +456,7 @@ module.exports = {
   priceSorobanToken,
   enrichSorobanTokenWithPrice,
   primeKnownPrices,
+  coingeckoIsLive,
   STABLECOINS,
   stats,
 };

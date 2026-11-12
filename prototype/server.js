@@ -1727,18 +1727,20 @@ async function scoreWallet(h, address, sorobanBalances, classicPrices) {
 }
 
 // Fetch USD prices for all classic tracked assets in one CoinGecko batch call.
-// Falls back to priceHintUSD when CoinGecko doesn't have a price.
+// Falls back to priceHintUSD when CoinGecko doesn't have a live price (a price
+// CoinGecko stopped updating, like YieldBlox's since January, isn't one).
 async function fetchClassicTrackedPrices() {
   const classics = TRACKED_ASSETS.filter(a => a.kind === "classic" && a.coingeckoId);
   const ids = classics.map(a => a.coingeckoId).join(",");
   const prices = new Map(); // `${code}:${issuer}` → priceUSD
   try {
     const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`
+      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_last_updated_at=true`
     );
     const data = await res.json();
     for (const asset of classics) {
-      const usd = data[asset.coingeckoId]?.usd ?? asset.priceHintUSD;
+      const entry = data[asset.coingeckoId];
+      const usd = pricingEngine.coingeckoIsLive(entry) ? entry.usd : asset.priceHintUSD;
       if (usd) prices.set(`${asset.code}:${asset.issuer}`, usd);
     }
   } catch (e) {

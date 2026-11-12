@@ -9,7 +9,8 @@
  *    10% of that mid.
  * 3. Otherwise a bid: the XLM book's best × XLM's price, or the USDC book's
  *    if that's higher, with at least USDC_MIN_BID_USD of bids at or above it
- *    and not above the XLM book's ask. No price if nobody bids in XLM.
+ *    and not above the XLM book's ask. No price if nobody bids in XLM, or if
+ *    nobody offers the asset for sale in either book.
  *
  * Step 2 is new. Many assets trade in USDC, not XLM, and their XLM book is a
  * few stray offers far apart, so step 3 valued them off a lowball bid. On
@@ -29,6 +30,16 @@
  * $0.016. FxDAO's USDx: $4,386 bid at $1.00, against $0.80. A bid is what
  * someone will pay for the asset now; the USDC one needs $20 behind it, as
  * most USDC books' best bid is a stray order of cents.
+ *
+ * And a bid needs a seller somewhere. With CoinGecko's frozen prices no
+ * longer used (lib/pricing-engine.js), some assets fell to a bid on a book
+ * where nobody sells: on 2026-11-12 VNX's euro (VEUR) had $1.01 of XLM bids,
+ * the best at 0.0000047 XLM ($0.0000007 a euro), and Etherfuse's KTB (about
+ * one won) a bid at 3 XLM ($0.44), with no asks in either book. Among
+ * Stellar Expert's top 596 assets, 11 had bids and no asks; the 9 of them
+ * Stellar Expert prices were at 0.00x to 0.72x its price (GBPZ at $0 against
+ * $1.31). Bids alone aren't a market: such an asset is left unpriced here,
+ * and the AMM layer may still price it.
  */
 
 const { Asset } = require("@stellar/stellar-sdk");
@@ -124,6 +135,8 @@ function createSdexPricer({ horizon, getXLMPrice }) {
         // a wallet by orders of magnitude. Leave unpriced; later layers may
         // still price it.
         if (bestBid === null) return null;
+        // Bids but nobody selling, in either book: no market to price from.
+        if (bestAsk === null && !(usdcBook?.asks?.length > 0)) return null;
         // Conservative: a bid. The USDC book's, when it's higher than the XLM
         // bid and at least USDC_MIN_BID_USD stands at or above it; not above
         // the XLM book's ask, as anyone could fill such a bid from that ask.
