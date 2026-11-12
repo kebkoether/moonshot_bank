@@ -6080,8 +6080,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           const pct = (b.totalValueUSD / d.totalValueUSD) * 100;
           if (pct < 0.5) return;
           const color = getTokenColor(b.code, i);
-          breakdownHTML += `<div class="breakdown-segment" style="width: ${pct}%; background: ${color};" title="${b.code}: ${fmt(pct)}%"></div>`;
-          legendHTML += `<div class="legend-item"><div class="legend-dot" style="background: ${color};"></div>${b.code} ${fmt(pct)}%</div>`;
+          const label = escapeHtml(b.code);
+          breakdownHTML += `<div class="breakdown-segment" style="width: ${pct}%; background: ${color};" title="${label}: ${fmt(pct)}%"></div>`;
+          legendHTML += `<div class="legend-item"><div class="legend-dot" style="background: ${color};"></div>${label} ${fmt(pct)}%</div>`;
         });
         breakdownHTML += "</div>";
         legendHTML += "</div>";
@@ -6373,7 +6374,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           const label = w.label || shortenAddr(w.address);
           return `<div class="pie-legend-item" data-idx="${i}" data-action="switch-wallet-view" data-address="${escapeHtml(w.address)}">
             <div class="pie-legend-dot" style="background:${colors[i]};"></div>
-            <span class="pie-legend-label" title="${escapeHtml(w.label || w.address)}">${label}</span>
+            <span class="pie-legend-label" title="${escapeHtml(w.label || w.address)}">${escapeHtml(label)}</span>
             <span class="pie-legend-value">${fmtUSD(w.totalValueUSD)}</span>
             <span class="pie-legend-pct">${pct}%</span>
           </div>`;
@@ -6806,10 +6807,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         pricedTokens.forEach((b, i) => {
           const pct = (b.valueUSD / d.totalValueUSD) * 100;
           if (pct < 0.5) return;
-          const code = b.asset.code;
-          const color = getTokenColor(code, i);
-          breakdownHTML += `<div class="breakdown-segment" style="width: ${pct}%; background: ${color};" title="${code}: ${fmt(pct)}%"></div>`;
-          legendHTML += `<div class="legend-item"><div class="legend-dot" style="background: ${color};"></div>${code} ${fmt(pct)}%</div>`;
+          const color = getTokenColor(b.asset.code, i);
+          const label = escapeHtml(b.asset.code);
+          breakdownHTML += `<div class="breakdown-segment" style="width: ${pct}%; background: ${color};" title="${label}: ${fmt(pct)}%"></div>`;
+          legendHTML += `<div class="legend-item"><div class="legend-dot" style="background: ${color};"></div>${label} ${fmt(pct)}%</div>`;
         });
         breakdownHTML += "</div>";
         legendHTML += "</div>";
@@ -6998,7 +6999,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       if (positions.length === 0 && byPool.length === 0) {
         const protocols = currentData.defiProtocols || [];
         const configuredMsg = protocols.length > 0
-          ? `<div style="margin-top:8px; font-size:13px">Tracking: ${protocols.map(p => p.name).join(", ")}</div>`
+          ? `<div style="margin-top:8px; font-size:13px">Tracking: ${escapeHtml(protocols.map(p => p.name).join(", "))}</div>`
           : `<div style="margin-top:12px; font-size:13px; color:var(--text-muted)">
                No supported DeFi protocols are configured for this deployment.<br>
                Supported: Blend Protocol, SushiSwap V3, Solv Protocol
@@ -7180,7 +7181,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         html += `<div><div style="font-weight:600">${escapeHtml(protocolLabel)}</div>`;
 
         if (pos.token0 && pos.token1) {
-          html += `<div style="font-size:12px; color:var(--text-muted)">${pos.token0.symbol} / ${pos.token1.symbol}`;
+          html += `<div style="font-size:12px; color:var(--text-muted)">${escapeHtml(pos.token0.symbol)} / ${escapeHtml(pos.token1.symbol)}`;
           if (pos.feeTier) html += ` (${pos.feeTier / 10000}%)`;
           html += `</div>`;
         }
@@ -7193,12 +7194,12 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         if (pos.type === "concentrated_lp") {
           html += `
             <div class="defi-detail-item">
-              <div class="defi-detail-label">${pos.token0.symbol}</div>
-              <div class="defi-detail-value">${pos.amounts.token0}</div>
+              <div class="defi-detail-label">${escapeHtml(pos.token0.symbol)}</div>
+              <div class="defi-detail-value">${escapeHtml(pos.amounts.token0)}</div>
             </div>
             <div class="defi-detail-item">
-              <div class="defi-detail-label">${pos.token1.symbol}</div>
-              <div class="defi-detail-value">${pos.amounts.token1}</div>
+              <div class="defi-detail-label">${escapeHtml(pos.token1.symbol)}</div>
+              <div class="defi-detail-value">${escapeHtml(pos.amounts.token1)}</div>
             </div>
             <div class="defi-detail-item">
               <div class="defi-detail-label">Status</div>
@@ -7207,8 +7208,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               </div>
             </div>
             <div class="defi-detail-item">
-              <div class="defi-detail-label">Fees (${pos.token0.symbol})</div>
-              <div class="defi-detail-value">${pos.unclaimedFees.token0}</div>
+              <div class="defi-detail-label">Fees (${escapeHtml(pos.token0.symbol)})</div>
+              <div class="defi-detail-value">${escapeHtml(pos.unclaimedFees.token0)}</div>
             </div>
           `;
         } else if (pos.type === "vault") {
@@ -7246,25 +7247,25 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           html += `
             <div class="defi-detail-item">
               <div class="defi-detail-label">Staked</div>
-              <div class="defi-detail-value">${pos.staked.amount} ${pos.staked.asset}</div>
+              <div class="defi-detail-value">${escapeHtml(pos.staked.amount)} ${escapeHtml(pos.staked.asset)}</div>
             </div>
             <div class="defi-detail-item">
               <div class="defi-detail-label">Rewards</div>
-              <div class="defi-detail-value" style="color:var(--green)">${pos.rewards.amount} ${pos.rewards.asset}</div>
+              <div class="defi-detail-value" style="color:var(--green)">${escapeHtml(pos.rewards.amount)} ${escapeHtml(pos.rewards.asset)}</div>
             </div>
           `;
         } else if (pos.type === "lp") {
           const apyHtml = pos.apy7d
-            ? `<div class="defi-detail-value" style="color:var(--green)">${pos.apy7d}</div>`
+            ? `<div class="defi-detail-value" style="color:var(--green)">${escapeHtml(pos.apy7d)}</div>`
             : `<div class="defi-detail-value" style="color:var(--text-muted)">—</div>`;
           html += `
             <div class="defi-detail-item">
-              <div class="defi-detail-label">${pos.token0.symbol}</div>
-              <div class="defi-detail-value">${pos.amounts.token0}</div>
+              <div class="defi-detail-label">${escapeHtml(pos.token0.symbol)}</div>
+              <div class="defi-detail-value">${escapeHtml(pos.amounts.token0)}</div>
             </div>
             <div class="defi-detail-item">
-              <div class="defi-detail-label">${pos.token1.symbol}</div>
-              <div class="defi-detail-value">${pos.amounts.token1}</div>
+              <div class="defi-detail-label">${escapeHtml(pos.token1.symbol)}</div>
+              <div class="defi-detail-value">${escapeHtml(pos.amounts.token1)}</div>
             </div>
             <div class="defi-detail-item">
               <div class="defi-detail-label">APY (7d)</div>
@@ -7697,18 +7698,18 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           const dir = tx.to === currentData.address ? "from" : "to";
           const other = dir === "from" ? tx.from : tx.to;
           details = `<strong>${dir}</strong> ${shortenAddr(other)}`;
-          amount = `${tx.amount} ${tx.assetCode}`;
+          amount = `${escapeHtml(tx.amount)} ${escapeHtml(tx.assetCode)}`;
         } else if (tx.type === "create_account") {
           details = `Funded <strong>${shortenAddr(tx.account)}</strong>`;
-          amount = `${tx.startingBalance} XLM`;
+          amount = `${escapeHtml(tx.startingBalance)} XLM`;
         } else if (tx.type === "change_trust") {
-          details = `${parseFloat(tx.limit) > 0 ? "Added" : "Removed"} trustline for <strong>${tx.assetCode}</strong>`;
+          details = `${parseFloat(tx.limit) > 0 ? "Added" : "Removed"} trustline for <strong>${escapeHtml(tx.assetCode)}</strong>`;
         } else if (tx.type === "manage_sell_offer" || tx.type === "manage_buy_offer") {
-          details = `${tx.sellingAsset} → ${tx.buyingAsset}`;
-          amount = `${tx.amount} @ ${tx.price}`;
+          details = `${escapeHtml(tx.sellingAsset)} → ${escapeHtml(tx.buyingAsset)}`;
+          amount = `${escapeHtml(tx.amount)} @ ${escapeHtml(tx.price)}`;
         } else if (tx.type.startsWith("path_payment")) {
-          details = `Swap ${tx.sourceAssetCode || "XLM"} → <strong>${tx.assetCode || "XLM"}</strong>`;
-          amount = `${tx.amount} ${tx.assetCode || "XLM"}`;
+          details = `Swap ${escapeHtml(tx.sourceAssetCode || "XLM")} → <strong>${escapeHtml(tx.assetCode || "XLM")}</strong>`;
+          amount = `${escapeHtml(tx.amount)} ${escapeHtml(tx.assetCode || "XLM")}`;
         } else {
           details = tx.type.replace(/_/g, " ");
         }
@@ -7849,7 +7850,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
       let html = '<div class="tx-list">';
       claimableData.claimableBalances.forEach((cb) => {
-        const code = cb.asset.code;
+        const code = escapeHtml(cb.asset.code);
         html += `
           <div class="claim-row">
             <div>
