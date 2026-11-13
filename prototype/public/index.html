@@ -3532,7 +3532,8 @@
         yield7d: s.yield7d || a.yield7d || null,
         yield30d: s.yield30d || a.yield30d || null,
         marketCap: s.marketCap || a.marketCap || null,
-        statsAsOf: s.asOf || null,
+        statsAsOf: s.asOf || null, // the yields' date
+        marketCapAsOf: s.marketCapAsOf || null, // the market cap's (Stellar TVL)
         statsSource: s.source || null,
         statsSourceUrl: s.sourceUrl || null,
         tvlSource: s.tvlSource || null,
@@ -4795,7 +4796,7 @@
         ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield30d)}</div>`
         : `<div class="rwa-stat-value muted">—</div>`;
       const marketCapStatHtml = a.marketCap
-        ? `<div class="rwa-stat-value">${escapeHtml(a.marketCap)}</div>${renderAsOf(a.statsAsOf, a.tvlSource || a.statsSource)}`
+        ? `<div class="rwa-stat-value">${escapeHtml(a.marketCap)}</div>${renderAsOf(a.marketCapAsOf, a.tvlSource || a.statsSource)}`
         : `<div class="rwa-stat-value muted">—</div>`;
 
       let html = `
@@ -4840,7 +4841,8 @@
 
       if (a.statsAsOf || a.statsSource) {
         const parts = [];
-        if (a.statsAsOf) parts.push(`as of ${escapeHtml(a.statsAsOf)}`);
+        // The yields' date; Stellar TVL shows its own under its figure.
+        if (a.statsAsOf) parts.push(`yields as of ${escapeHtml(a.statsAsOf)}`);
         if (a.statsSource) parts.push(`source: ${escapeHtml(a.statsSource)}`);
         html += `<div style="font-size:12px;color:var(--text-muted);margin-top:-12px;margin-bottom:24px;">${parts.join(" · ")}</div>`;
       }

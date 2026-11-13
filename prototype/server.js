@@ -1097,12 +1097,17 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
     for (const cat of (catalog.categories || [])) {
       for (const a of (cat.assets || [])) {
         const slug = rwaSlugServer(a);
+        // Each figure keeps its own date. asOf is the yields' date: the page
+        // shows it under the yields. marketCapAsOf is the market cap's
+        // (Stellar TVL). A live market cap used to set asOf to today, so a
+        // curated yield from June (BENJI's 3.49%) showed "as of" today.
         const entry = {
           yield7d: null,
           yield30d: null,
           marketCap: null,
           supplyTokens: null,
           asOf: null,
+          marketCapAsOf: null,
           source: null,
         };
         // Layer 1: curated values
@@ -1111,8 +1116,9 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
           entry.yield7d = c.yield7d || null;
           entry.yield30d = c.yield30d || null;
           entry.marketCap = c.marketCap || null;
-          entry.asOf = c.asOf || null;
           entry.source = c.source || null;
+          if (entry.yield7d || entry.yield30d) entry.asOf = c.asOf || null;
+          if (entry.marketCap) entry.marketCapAsOf = c.asOf || null;
         }
         // Layer 1.5: live issuer-API yield + Stellar TVL (rwa-yield-fetcher)
         // overrides curated values. tvl and yield7d may come from the same or
@@ -1129,12 +1135,13 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
           if (fresh.yield30d) {
             entry.yield30d = fresh.yield30d;
           }
+          if (fresh.yield7d || fresh.yield30d) entry.asOf = fresh.asOf || null;
           if (fresh.tvl) {
             entry.marketCap = fresh.tvl;
             entry.supplyTokens = fresh.supplyTokens ?? entry.supplyTokens;
             entry.tvlSource = fresh.tvlSource || null;
+            entry.marketCapAsOf = fresh.asOf || null;
           }
-          if (fresh.asOf) entry.asOf = fresh.asOf;
         }
         // Layer 2: live Horizon market cap (classic assets only) — overrides curated
         if (a.issuer && a.code) {
@@ -1144,7 +1151,8 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
             if (live.marketCapUSD) {
               entry.marketCap = formatBigUSD(live.marketCapUSD);
               entry.source = entry.source ? `${entry.source} + Horizon` : "Horizon";
-              entry.asOf = new Date().toISOString().slice(0, 10);
+              entry.tvlSource = "Horizon (supply × price)";
+              entry.marketCapAsOf = new Date().toISOString().slice(0, 10);
             }
           }
         }
