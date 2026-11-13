@@ -144,6 +144,19 @@ test("the USDC bid isn't used when it's lower than the XLM bid, above the XLM as
   assert.equal(await noBid.price("TOKEN", OTHER), null);
 });
 
+test("bids with nobody selling, in either book, give no price", async () => {
+  // VNX's euro (VEUR) on 2026-11-12: $1.01 of XLM bids, the best at
+  // 0.0000047 XLM, no asks, no USDC book. Before: $0.0000007 a euro.
+  const veur = pricer({ XLM: { bids: [o(0.0000047, 6.9), o(0.000001, 0.06)], asks: [] } });
+  assert.equal(await veur.price("VEUR", OTHER), null);
+  // Etherfuse's KTB (about one won): a bid at 3 XLM ($0.49), no asks.
+  const ktb = pricer({ XLM: { bids: [o(3, 30)], asks: [] }, USDC: { bids: [], asks: [] } });
+  assert.equal(await ktb.price("KTB", ETHERFUSE), null);
+  // An ask in the USDC book is a seller: the XLM bid stands, as before.
+  const usdcAsk = pricer({ XLM: { bids: [o(3, 30)], asks: [] }, USDC: { bids: [], asks: [o(0.9, 5)] } });
+  assert.deepEqual([(await usdcAsk.price("KTB", ETHERFUSE)).xlm, "XLM"], [3, "XLM"]);
+});
+
 test("usdcBidPrice: the price at which the bids add up to $20", () => {
   const { usdcBidPrice, USDC_MIN_BID_USD } = require("../lib/sdex-price");
   assert.equal(USDC_MIN_BID_USD, 20);
