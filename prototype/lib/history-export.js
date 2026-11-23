@@ -18,6 +18,11 @@
  * Newest first, until the start of the history or a limit: 10,000 rows, 100
  * pages of each kind, or 100 seconds. A limit cuts the file at a whole
  * transaction, and the result says so.
+ *
+ * Each row also has the wallet's balance of that asset right after it
+ * (balance_after), counted back from the wallet's balances read once the
+ * history has been read, and the result has each asset's balance before the
+ * file's first row (its opening balance for the period).
  */
 
 const PAGE_SIZE = 200;
@@ -27,7 +32,7 @@ const TIME_LIMIT_MS = 100_000;
 
 // Each row's fields, in the file's order (the file adds the wallet's label).
 const COLUMNS = [
-  "date_utc", "wallet", "type", "direction", "amount", "asset", "asset_id",
+  "date_utc", "wallet", "type", "direction", "amount", "asset", "asset_id", "balance_after",
   "counterparty", "operation_type", "memo", "transaction_hash", "operation_id", "notes",
 ];
 
@@ -271,6 +276,72 @@ function buildRows(address, { effects, operations, transactions }, floor = 0n, {
   return rows;
 }
 
+// ── Balances ────────────────────────────────────────────────────────────────
+// Rows are counted back from the wallet's balances now: the balance after the
+// newest row is today's, and each row before it is that less what came after.
+// Read once the history has been, so a change landing in between is newer
+// than every record read: its asset's running balance is then left out
+// rather than wrong.
+
+/** "-12.5" → -125000000n; anything else → null. */
+function toStroops(amount) {
+  const m = /^(-?)(\d+)(?:\.(\d{1,7}))?$/.exec(String(amount));
+  if (!m) return null;
+  const v = BigInt(m[2]) * STROOPS + BigInt((m[3] || "").padEnd(7, "0"));
+  return m[1] ? -v : v;
+}
+
+const keyOf = (asset, assetId) => `${asset}\n${assetId}`;
+const ledgerOf = (toid) => Number(BigInt(toid) >> 32n);
+
+/** A Horizon account's balances: key → { asset, asset_id, stroops, ledger }. */
+function balancesOf(account) {
+  const out = new Map();
+  for (const b of account.balances || []) {
+    const id = b.asset_type === "native" ? { asset: "XLM", asset_id: "native" }
+      : b.asset_type === "liquidity_pool_shares" ? poolShares(b.liquidity_pool_id)
+        : { asset: b.asset_code, asset_id: b.asset_issuer };
+    // XLM sits in the account entry; each trustline has its own.
+    const ledger = Number(b.asset_type === "native" ? account.last_modified_ledger : b.last_modified_ledger) || 0;
+    out.set(keyOf(id.asset, id.asset_id), { ...id, stroops: toStroops(b.balance), ledger });
+  }
+  return out;
+}
+
+/**
+ * Sets each row's balance_after, newest first from `account`'s balances.
+ * `newestLedger`: the newest ledger the history read reached. An asset whose
+ * balance changed after it gets no running balance ("moved").
+ * → { openingBalances: [{ asset, asset_id, balance }], moved: [{ asset, asset_id }] }
+ */
+function addBalances(rows, account, newestLedger) {
+  const now = balancesOf(account);
+  const running = new Map(); // key → stroops, or null: unknown
+  const moved = new Map();
+  const start = (key, id) => {
+    const b = now.get(key);
+    if (!b) { running.set(key, 0n); return; } // not held now: the trustline is gone
+    if (newestLedger > 0 && b.ledger > newestLedger) { moved.set(key, id); running.set(key, null); return; }
+    running.set(key, b.stroops);
+  };
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    const key = keyOf(r.asset, r.asset_id);
+    if (!running.has(key)) start(key, { asset: r.asset, asset_id: r.asset_id });
+    const bal = running.get(key);
+    const amount = toStroops(r.amount);
+    r.balance_after = bal === null ? "" : fromStroops(bal);
+    running.set(key, bal === null || amount === null ? null : bal - amount);
+  }
+  // Assets held now with no rows in the file: unchanged over it.
+  for (const [key, b] of now) if (!running.has(key)) start(key, { asset: b.asset, asset_id: b.asset_id });
+  const openingBalances = [...running].map(([key, v]) => {
+    const [asset, asset_id] = key.split("\n");
+    return { asset, asset_id, balance: v === null ? "" : fromStroops(v) };
+  });
+  return { openingBalances, moved: [...moved.values()] };
+}
+
 // ── Reading ─────────────────────────────────────────────────────────────────
 
 const OUT_OF_TIME = Symbol("out of time");
@@ -300,7 +371,7 @@ function byDeadline(promise, deadline, now) {
  *   notFound: Horizon doesn't know the account.
  */
 async function readHistory(address, {
-  page, maxRows = MAX_ROWS, maxPages = MAX_PAGES, timeLimitMs = TIME_LIMIT_MS, now = Date.now, retryDelayMs = 1000,
+  page, account, maxRows = MAX_ROWS, maxPages = MAX_PAGES, timeLimitMs = TIME_LIMIT_MS, now = Date.now, retryDelayMs = 1000,
 }) {
   const deadline = now() + timeLimitMs;
   const stream = () => ({ records: [], cursor: null, done: false, stopped: null, pages: 0, oldestTx: null, reachedFloor: false });
@@ -413,10 +484,31 @@ async function readHistory(address, {
     complete = false;
     limit = "row limit";
   }
+  // Running balances, from the wallet's balances read now (`account()`:
+  // its Horizon account). The newest ledger read is the older of the two
+  // streams' newest records: both start at the same moment, but a
+  // transaction landing between their first pages is in one only.
+  const newest = [
+    s.effects.records[0] && ledgerOf(opIdOf(s.effects.records[0])),
+    s.transactions.records[0] && ledgerOf(s.transactions.records[0].paging_token),
+  ].filter((n) => n > 0);
+  let balances = { openingBalances: null, moved: [] };
+  const acct = account && !s.effects.notFound ? await Promise.resolve().then(account).catch(() => null) : null;
+  if (acct) balances = addBalances(rows, acct, newest.length ? Math.min(...newest) : 0);
+  else for (const r of rows) r.balance_after = "";
+  // From the account's creation every asset starts at 0: anything else means
+  // a change the file doesn't have.
+  const openingCheck = complete && s.effects.records.some((e) => e.type === "account_created") && balances.openingBalances
+    ? balances.openingBalances.filter((b) => b.balance !== "" && toStroops(b.balance) !== 0n)
+    : [];
+
   return {
     error: s.effects.error || s.transactions.error || null,
     notFound: !!s.effects.notFound,
     rows,
+    openingBalances: balances.openingBalances,
+    balancesMoved: balances.moved,
+    openingCheck,
     complete,
     limit,
     from: rows.length ? rows[0].date_utc : null,
@@ -470,6 +562,6 @@ function _resetForTests() {
 const asArrays = (rows) => rows.map((r) => COLUMNS.map((c) => r[c]));
 
 module.exports = {
-  readHistory, exportHistory, buildRows, asArrays, COLUMNS,
+  readHistory, exportHistory, buildRows, asArrays, addBalances, COLUMNS,
   PAGE_SIZE, MAX_ROWS, MAX_PAGES, TIME_LIMIT_MS, _resetForTests,
 };

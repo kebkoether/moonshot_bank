@@ -4,7 +4,10 @@
  * the rows from Horizon (lib/history-export.js, GET
  * /api/v1/account/:address/history/export); this builds the file from them.
  *
- * - One row per balance change, oldest first: amount signed (+ in, − out).
+ * - One row per balance change, oldest first: amount signed (+ in, − out),
+ *   and balance_after, the wallet's balance of that asset right after it.
+ * - First, for each wallet, an "opening balance" row per asset: its balance
+ *   before the wallet's first row in the file.
  * - wallet and label on every row, so files from several wallets combine.
  *   Labels are the browser's own (the saved wallet list).
  * - Labels, memos and token codes come from users and chains, so a text cell
@@ -16,9 +19,11 @@
 (function (root) {
   // The server's columns, with label after wallet.
   const COLUMNS = [
-    "date_utc", "wallet", "label", "type", "direction", "amount", "asset", "asset_id",
+    "date_utc", "wallet", "label", "type", "direction", "amount", "asset", "asset_id", "balance_after",
     "counterparty", "operation_type", "memo", "transaction_hash", "operation_id", "notes",
   ];
+  // Numbers: written as they are (a text cell would get a ' before a minus).
+  const NUMBERS = new Set(["amount", "balance_after"]);
 
   /** A text cell: never the start of a formula (=, +, -, @, tab, CR). */
   function text(v) {
@@ -37,11 +42,18 @@
    */
   function rowsOf(wallet) {
     const cols = wallet.columns || [];
-    return (wallet.rows || []).map((r) => {
+    const rows = (wallet.rows || []).map((r) => {
       const o = { label: wallet.label || "" };
       cols.forEach((c, i) => { o[c] = r[i]; });
       return o;
     });
+    // Its opening balances, dated with its first row so they sort just before it.
+    const opening = (wallet.openingBalances || []).map((b) => ({
+      date_utc: wallet.from || "", wallet: wallet.address || "", label: wallet.label || "",
+      type: "opening balance", asset: b.asset, asset_id: b.asset_id, balance_after: b.balance,
+      notes: b.balance === "" ? "unknown: the balance moved while the file was being made" : "before the first row of this wallet in the file",
+    }));
+    return [...opening, ...rows];
   }
 
   /**
@@ -55,7 +67,7 @@
     rows.sort((a, b) => (a.date_utc < b.date_utc ? -1 : a.date_utc > b.date_utc ? 1 : 0));
     const lines = [COLUMNS.join(",")];
     for (const r of rows) {
-      lines.push(COLUMNS.map((c) => quote(c === "amount" ? (r.amount == null ? "" : r.amount) : text(r[c]))).join(","));
+      lines.push(COLUMNS.map((c) => quote(NUMBERS.has(c) ? (r[c] == null ? "" : r[c]) : text(r[c]))).join(","));
     }
     return lines.join("\r\n") + "\r\n";
   }
@@ -109,6 +121,13 @@
     for (const r of missing) {
       const m = r.missingOperations;
       parts.push(`Horizon couldn't list ${single ? "the wallet's" : `${nameOf(r)}'s`} operations, so ${n(m)} of ${single ? "the" : "its"} rows ${m === 1 ? "has" : "have"} no counterparty.`);
+    }
+    const assets = (list) => list.map((b) => b.asset).join(", ");
+    for (const r of ok.filter((r) => r.balancesMoved && r.balancesMoved.length)) {
+      parts.push(`${single ? "The wallet's" : `${nameOf(r)}'s`} ${assets(r.balancesMoved)} balance changed while the file was being made, so its balance_after is blank. Download again for it.`);
+    }
+    for (const r of ok.filter((r) => r.openingCheck && r.openingCheck.length)) {
+      parts.push(`From ${single ? "the account's" : `${nameOf(r)}'s`} creation every balance should start at 0, but ${r.openingCheck.map((b) => `${b.asset} starts at ${b.balance}`).join(", ")}: a change is missing from the file.`);
     }
     if (failed.length) {
       for (const r of failed) parts.push(`Not in the file: ${nameOf(r)}. ${r.error}`);

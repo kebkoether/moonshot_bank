@@ -576,7 +576,8 @@ app.get("/api/v1/account/:address/history/export", sameOriginOnly, async (req, r
     return q.call().then((r) => r.records);
   };
   try {
-    const r = await historyExport.exportHistory(address, { page });
+    // Its balances, read once the history has been: each row's balance after it.
+    const r = await historyExport.exportHistory(address, { page, account: () => h.loadAccount(address) });
     if (r.notFound) return res.status(404).json({ error: "Horizon has no history for this account." });
     if (!r.rows.length && !r.complete) {
       return res.status(502).json({ error: "Couldn't read the history from Horizon. Try again in a minute." });
@@ -590,6 +591,12 @@ app.get("/api/v1/account/:address/history/export", sameOriginOnly, async (req, r
       to: r.to,
       startsAtCreation: r.startsAtCreation,
       missingOperations: r.missingOperations,
+      // Each asset's balance before the first row; assets whose balance moved
+      // while the file was being made (no running balance); and, from the
+      // account's creation, assets that don't start at 0.
+      openingBalances: r.openingBalances,
+      balancesMoved: r.balancesMoved,
+      openingCheck: r.openingCheck,
       // Arrays in the order of `columns`: a third the size of objects.
       columns: historyExport.COLUMNS,
       rows: historyExport.asArrays(r.rows),
