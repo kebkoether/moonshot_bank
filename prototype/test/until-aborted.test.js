@@ -140,8 +140,8 @@ test("Upshift: a vault list that never arrives is given up, so the list can refr
   assert.notEqual(settled, "STILL WAITING", "otherwise the list is never fetched again");
 });
 
-test("DeFi tab: a Templar or Upshift body that never arrives fails that protocol's refresh, not the loop", async () => {
-  for (const id of ["templar", "upshift"]) {
+test("DeFi tab: a Templar, Upshift or Aquarius body that never arrives fails that protocol's refresh, not the loop", async () => {
+  for (const id of ["templar", "upshift", "aquarius"]) {
     const done = await whileTimeoutsFire(explorer.refreshOnce({ only: [id] }));
     assert.notEqual(done, "STILL WAITING", `${id}: the loop refreshes every protocol, one after another`);
     const card = explorer.getSnapshot({ full: true }).protocols.find((p) => p.id === id);
