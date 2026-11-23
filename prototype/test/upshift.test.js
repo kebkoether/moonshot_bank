@@ -137,6 +137,27 @@ test("once the list has arrived, its APY is shown and a vault only it lists is r
   assert.equal(listFetches, 1);
 });
 
+test("the positions read only active vaults with metadata; the list the DeFi tab shares keeps every status", async () => {
+  const PAUSED = StrKey.encodeContract(crypto.randomBytes(32));
+  const BARE = StrKey.encodeContract(crypto.randomBytes(32));
+  const paused = { ...apiVault(PAUSED, "USDC", "oldUSDC", 0.03), status: "paused" };
+  const bare = { ...apiVault(BARE, "USDC", "bareUSDC", 0.03), stellar_vault_metadata: undefined };
+  respond = (resolve) => resolve(ok([...API_LIST, paused, bare]));
+  shares.set(PAUSED, 10n);
+  shares.set(BARE, 10n);
+  const user = wallet().publicKey();
+  await Upshift.getPositions(user, ctx);
+  await Upshift._vaultListSettled?.();
+  assert.deepEqual(await Upshift.getPositions(user, ctx), []);
+  const list = await Upshift.stellarVaultList(60_000);
+  assert.deepEqual(
+    list.map((v) => v.receipt_token_symbol).sort(),
+    ["bareUSDC", "earnXLM", "newUSDC", "oldUSDC", "sentUSDC"],
+    "every Stellar vault, and no other chain's"
+  );
+  assert.equal(listFetches, 1);
+});
+
 test("when the list is an hour old it is fetched again in the background, once", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
   shares.set(EARN_XLM, 100n);
