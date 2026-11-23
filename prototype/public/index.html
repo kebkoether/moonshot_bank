@@ -2114,7 +2114,11 @@
        here applies above 600 px. */
     @media (max-width: 600px) {
       /* Header: the buttons wrap and get smaller (the inline padding on
-         "My Portfolio" and "+ Save" needs !important). */
+         "My Portfolio" and "+ Save" needs !important). Wrapped, it is about
+         190 px tall, close to a third of a phone screen; kept on top while
+         scrolling, it covered that much of every page and slid over the
+         Portfolio / DeFi / RWAs tabs. On phones it scrolls away with the page. */
+      .header { position: static; }
       .header-right { flex-wrap: wrap; gap: 8px; width: 100%; }
       .header-right .btn, .header-right .wallet-btn { padding: 8px 12px !important; font-size: 12px !important; }
       .network-badge { padding: 5px 10px; }
