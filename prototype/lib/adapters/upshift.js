@@ -50,9 +50,10 @@ const KNOWN_VAULTS = [
   stellar_vault_metadata: { deposit_token_symbol, deposit_token_decimals: 7 },
 }));
 
-let apiVaults = null; // the API's Stellar vaults, from the last good fetch
-let listedAt = 0; // when apiVaults was fetched
+let stellarList = null; // the API's Stellar vaults, every status, from the last good fetch
+let listedAt = 0; // when stellarList was fetched
 let listFailedAt = 0;
+let listError = null; // why the last fetch failed
 let listRefresh = null; // the fetch in progress, if any
 
 // Display formatter for token amounts in the DeFi position cards.
@@ -69,8 +70,8 @@ function fmtTokenAmount(n) {
 }
 
 /**
- * Fetch the Stellar subset of Upshift's vault list into apiVaults. One fetch
- * at a time; a failure keeps the last good list. Never rejects.
+ * Fetch the Stellar subset of Upshift's vault list into stellarList. One
+ * fetch at a time; a failure keeps the last good list. Never rejects.
  */
 function refreshVaultList() {
   if (listRefresh) return listRefresh;
@@ -79,16 +80,19 @@ function refreshVaultList() {
     const timer = setTimeout(() => ctrl.abort(), VAULT_LIST_TIMEOUT_MS);
     timer.unref?.();
     try {
-      const res = await fetch(`${UPSHIFT_API_BASE}/tokenized_vaults`, { signal: ctrl.signal });
+      const res = await fetch(`${UPSHIFT_API_BASE}/tokenized_vaults`, {
+        headers: { "User-Agent": "StellarScope/1.0" },
+        signal: ctrl.signal,
+      });
       if (!res.ok) throw new Error("HTTP " + res.status);
       // Or listRefresh would stay set, and the list never refresh again.
       const all = await untilAborted(res.json(), ctrl.signal);
-      apiVaults = (Array.isArray(all) ? all : []).filter(
-        (v) => v.chain_type === "stellar" && v.status === "active" && v.stellar_vault_metadata
-      );
+      stellarList = (Array.isArray(all) ? all : []).filter((v) => v.chain_type === "stellar");
       listedAt = Date.now();
+      listError = null;
     } catch (e) {
       listFailedAt = Date.now();
+      listError = e.message;
       console.warn("Upshift vault list fetch failed:", e.message);
     } finally {
       clearTimeout(timer);
@@ -108,8 +112,24 @@ function stellarVaults() {
     refreshVaultList();
   }
   const byAddress = new Map(KNOWN_VAULTS.map((v) => [v.address, v]));
-  for (const v of apiVaults || []) byAddress.set(v.address, v);
+  for (const v of stellarList || []) {
+    if (v.status === "active" && v.stellar_vault_metadata) byAddress.set(v.address, v);
+  }
   return [...byAddress.values()];
+}
+
+/**
+ * Upshift's Stellar vaults (every status), at most `maxAgeMs` old: the list
+ * kept here, fetched now if it's older. The DeFi tab's Upshift card reads it
+ * too, so the 13 MB list is downloaded once an hour instead of twice (once
+ * here, once there). Rejects if the fetch it needed failed.
+ */
+async function stellarVaultList(maxAgeMs) {
+  if (stellarList && Date.now() - listedAt <= maxAgeMs) return stellarList;
+  const before = listedAt;
+  await refreshVaultList();
+  if (listedAt === before || !stellarList) throw new Error(`Upshift vault list: ${listError || "unavailable"}`);
+  return stellarList;
 }
 
 /**
@@ -230,12 +250,15 @@ const UpshiftAdapter = {
     return positions.filter((p) => p !== null);
   },
 
+  stellarVaultList,
+
   // Tests only.
   _vaultListSettled: () => listRefresh || Promise.resolve(),
   _resetForTests() {
-    apiVaults = null;
+    stellarList = null;
     listedAt = 0;
     listFailedAt = 0;
+    listError = null;
     listRefresh = null;
   },
 };

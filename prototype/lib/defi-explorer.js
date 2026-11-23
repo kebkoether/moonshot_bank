@@ -36,6 +36,7 @@
 const { simulateContractCall, getTokenBalance, getTokenMetadata } = require("./soroban-rpc");
 const pricingEngine = require("./pricing-engine");
 const BlendAdapter = require("./adapters/blend");
+const UpshiftAdapter = require("./adapters/upshift");
 const StellarSdk = require("@stellar/stellar-sdk");
 const { untilAborted } = require("./until-aborted");
 const { Address, nativeToScVal, scValToNative } = StellarSdk;
@@ -537,23 +538,19 @@ async function fetchSoroswap() {
 // Upshift's API has no filter: every call returns its whole list, every vault
 // on every chain. On 2026-10-30 that was 164 vaults and 13.1 MB, taking 12-20
 // s, for the 10 vaults on Stellar. Upshift recomputes TVL and APY once a day
-// (metrics_last_updated is just after 00:00 UTC), so this is fetched hourly
-// (see FETCHERS), not every minute. The timeout keeps a stalled download from
-// holding up the refresh loop, and with it every other protocol.
-const UPSHIFT_TIMEOUT_MS = 60_000;
+// (metrics_last_updated is just after 00:00 UTC), so this is read hourly (see
+// FETCHERS), not every minute.
+//
+// The wallet adapter (lib/adapters/upshift.js) keeps the same list, fetched
+// hourly too, and both used to download it: 26 MB an hour. The card now reads
+// the adapter's list, downloading it only when it's older than this. (That
+// download has the adapter's 60-second time limit, body included, so a stalled
+// one can't hold up the refresh loop.)
+const UPSHIFT_LIST_MAX_AGE_MS = 55 * 60_000;
 
 async function fetchUpshift() {
-  const signal = AbortSignal.timeout(UPSHIFT_TIMEOUT_MS);
-  const res = await fetch("https://api.upshift.finance/v1/tokenized_vaults", {
-    headers: { "User-Agent": "StellarScope/1.0" },
-    signal,
-  });
-  if (!res.ok) throw new Error(`Upshift HTTP ${res.status}`);
-  // The body too: a read left pending would hold the refresh loop for good.
-  const all = await untilAborted(res.json(), signal);
-  const vaults = (Array.isArray(all) ? all : []).filter(
-    (v) => v.chain_type === "stellar" && v.is_visible
-  );
+  const all = await UpshiftAdapter.stellarVaultList(UPSHIFT_LIST_MAX_AGE_MS);
+  const vaults = all.filter((v) => v.is_visible);
   const pools = [];
   let totalTvl = 0;
   for (const v of vaults) {

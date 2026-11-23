@@ -10,7 +10,11 @@ require("./helpers");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+// The wallet adapter reads balances with this (destructured when it's loaded):
+// no RPC here, every vault holds nothing.
+require("../lib/soroban-rpc").getTokenBalanceStrict = async () => "0";
 const explorer = require("../lib/defi-explorer");
+const upshift = require("../lib/adapters/upshift"); // keeps the list the card reads
 
 const MIN = 60_000;
 const UPSHIFT_URL = "https://api.upshift.finance/v1/tokenized_vaults";
@@ -30,6 +34,7 @@ let now;
 
 test.beforeEach((t) => {
   explorer._resetForTests();
+  upshift._resetForTests();
   calls = [];
   answer = () => new Response(JSON.stringify(LIST), { status: 200 });
   now = Date.UTC(2026, 9, 30, 12, 0, 0);
@@ -101,4 +106,33 @@ test("the download has a timeout, so a stalled one can't hold up the other proto
   const { signal } = calls.find((c) => c.url === UPSHIFT_URL).opts || {};
   assert.ok(signal instanceof AbortSignal, "fetch gets an AbortSignal");
   assert.equal(signal.aborted, false);
+});
+
+// ── One download for the card and the wallet adapter ───────────────────────
+
+const G = "GCTSFIICPYZW2R6HWA25IWDHQYSFBJJUAXVYHGUQ7K64G54ZQ6OOJUF6";
+
+test("a list the wallet adapter downloaded under 55 minutes ago serves the card: one download, not two", async () => {
+  // A wallet load fetches the list in the background.
+  await upshift.getPositions(G, { xlmPrice: { usd: 0.2 } });
+  await upshift._vaultListSettled();
+  assert.equal(upshiftCalls(), 1);
+  now += 30 * MIN;
+  await explorer.refreshOnce({ only: ["upshift"] });
+  assert.equal(upshiftCalls(), 1, "the card read the adapter's list");
+  assert.equal(upshiftCard().pools.length, 2);
+  // Past 55 minutes, the card downloads it, and the adapter has the new one.
+  await tickAfter(60 * MIN);
+  assert.equal(upshiftCalls(), 2);
+  await upshift.getPositions(G, { xlmPrice: { usd: 0.2 } });
+  await upshift._vaultListSettled();
+  assert.equal(upshiftCalls(), 2, "nor the adapter after the card's download");
+});
+
+test("the card and the adapter filter the same list their own way", async () => {
+  // Hidden but active (Sentora PYUSD here): read for positions, not on the card.
+  answer = () => new Response(JSON.stringify(LIST.map((v) => ({ ...v, status: "active" }))), { status: 200 });
+  await tickAfter(0);
+  assert.deepEqual(upshiftCard().pools.map((p) => p.address), ["CALF", "CC6T"], "visible ones only, no other chain");
+  assert.equal(upshiftCalls(), 1);
 });
