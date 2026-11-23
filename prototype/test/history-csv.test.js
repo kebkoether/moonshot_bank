@@ -94,3 +94,37 @@ test("all wallets: the rows and dates overall, then each wallet that isn't whole
     { ...exported(B, [day("2025-09-21")], { startsAtCreation: false }), label: "b" },
   ]), "Downloaded 2 rows from 2 wallets, 2025-09-21 to 2025-09-21. Horizon doesn't keep their history before 2025-09-21.");
 });
+
+// ── Running and opening balances ────────────────────────────────────────────
+
+test("each wallet's opening balances come first, then its rows, each with the balance after it", () => {
+  const a = { ...exported(A, [
+    { date_utc: "2026-01-02T00:00:00Z", amount: "-5.0000000", balance_after: "95.0000000" },
+    { date_utc: "2026-01-04T00:00:00Z", amount: "1.0000000", balance_after: "96.0000000" },
+  ], { openingBalances: [{ asset: "XLM", asset_id: "native", balance: "100.0000000" }, { asset: "USDC", asset_id: "GA5Z", balance: "-0.0000001" }] }), label: "Ops" };
+  const b = { ...exported(B, [{ date_utc: "2026-01-03T00:00:00Z", amount: "2.0000000", balance_after: "2.0000000" }],
+    { openingBalances: [{ asset: "XLM", asset_id: "native", balance: "0.0000000" }] }) };
+  const lines = parse(C.build([a, b]));
+  const col = (line, name) => line.split(",")[C.COLUMNS.indexOf(name)];
+  assert.deepEqual(lines.slice(1).map((l) => [col(l, "date_utc").slice(0, 10), col(l, "wallet").slice(0, 4), col(l, "type"), col(l, "asset"), col(l, "amount"), col(l, "balance_after")]), [
+    ["2026-01-02", "GCTS", "opening balance", "XLM", "", "100.0000000"],
+    ["2026-01-02", "GCTS", "opening balance", "USDC", "", "-0.0000001"], // a number: no ' before the minus
+    ["2026-01-02", "GCTS", "payment", "XLM", "-5.0000000", "95.0000000"],
+    ["2026-01-03", "GDQC", "opening balance", "XLM", "", "0.0000000"],
+    ["2026-01-03", "GDQC", "payment", "XLM", "2.0000000", "2.0000000"],
+    ["2026-01-04", "GCTS", "payment", "XLM", "1.0000000", "96.0000000"],
+  ]);
+  assert.equal(col(lines[1], "label"), "Ops");
+});
+
+test("no opening balances (the server couldn't read the balances): just the rows", () => {
+  const lines = parse(C.build([exported(A, [{ date_utc: "2026-01-02T00:00:00Z", amount: "1.0000000", balance_after: "" }], { openingBalances: null })]));
+  assert.equal(lines.length, 2);
+});
+
+test("the page says when a balance moved during the download, or doesn't add up from the account's creation", () => {
+  const moved = exported(A, [day("2026-11-06")], { balancesMoved: [{ asset: "USDC", asset_id: "GA5Z" }] });
+  assert.match(C.summary([moved]), /The wallet's USDC balance changed while the file was being made, so its balance_after is blank\. Download again for it\.$/);
+  const off = exported(A, [day("2026-11-06")], { openingCheck: [{ asset: "AQUA", asset_id: "GBNZ", balance: "5.0000000" }] });
+  assert.match(C.summary([off]), /From the account's creation every balance should start at 0, but AQUA starts at 5\.0000000: a change is missing from the file\.$/);
+});

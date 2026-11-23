@@ -297,11 +297,25 @@ test("GET /api/v1/account/:address/history/export sends the rows, for the page t
     b.call = async () => { asked.push(b.q); return { records: h.page(kind, b.q.cursor) }; };
     return b;
   };
+  // The wallet's balances now: what the rows add up to.
+  const held = sums((await H.readHistory(ME, { page: h.page })).rows);
+  H._resetForTests();
   const P = StellarSdk.Horizon.Server.prototype;
-  const real = { effects: P.effects, operations: P.operations, transactions: P.transactions };
+  const real = { effects: P.effects, operations: P.operations, transactions: P.transactions, loadAccount: P.loadAccount };
   P.effects = () => builder("effects");
   P.operations = () => builder("operations");
   P.transactions = () => builder("transactions");
+  P.loadAccount = async (id) => {
+    assert.equal(id, ME);
+    return {
+      last_modified_ledger: 60_000_012,
+      balances: [
+        { asset_type: "native", balance: held.XLM },
+        { ...USDC, balance: held.USDC, last_modified_ledger: 60_000_009 },
+        { asset_type: "liquidity_pool_shares", liquidity_pool_id: POOL, balance: held["pool shares"], last_modified_ledger: 60_000_008 },
+      ],
+    };
+  };
   try {
     const { app } = require("../server.js");
     const res = await request(app, "GET", `/api/v1/account/${ME}/history/export`);
@@ -311,11 +325,20 @@ test("GET /api/v1/account/:address/history/export sends the rows, for the page t
     assert.deepEqual(meta, {
       address: ME, complete: true, limit: null, from: "2026-01-01T00:01:00Z", to: "2026-01-01T00:12:00Z",
       startsAtCreation: true, missingOperations: 0,
+      // From the account's creation, everything starts at 0.
+      openingBalances: [
+        { asset: "XLM", asset_id: "native", balance: "0.0000000" },
+        { asset: "USDC", asset_id: USDC_ISSUER, balance: "0.0000000" },
+        { asset: "pool shares", asset_id: POOL, balance: "0.0000000" },
+      ],
+      balancesMoved: [],
+      openingCheck: [],
     });
     assert.deepEqual(columns, H.COLUMNS);
     assert.equal(rows.length, 27);
     const last = Object.fromEntries(columns.map((c, i) => [c, rows[26][i]]));
     assert.deepEqual([last.type, last.amount, last.asset, last.counterparty, last.memo], ["payment", "-5.0000000", "XLM", BOB, "rent"]);
+    assert.equal(last.balance_after, held.XLM, "the newest row ends at today's balance");
     assert.deepEqual(asked.map((q) => q.forAccount), Array(asked.length).fill(ME));
     assert.ok(asked.every((q) => q.order === "desc" && q.limit === 200));
     assert.ok(asked.filter((q) => q.kind === "transactions").every((q) => q.includeFailed === true), "failed transactions' fees too");
@@ -342,4 +365,118 @@ test("the buttons: a wallet's History tab, and All Wallets' History tab; the pag
   const res = await request(app, "GET", "/history-csv.js");
   assert.equal(res.status, 200);
   assert.match(res.headers["content-type"], /javascript/);
+});
+
+// ── Running balances ────────────────────────────────────────────────────────
+// Each row's balance_after is counted back from the wallet's balances, read
+// once the history has been. The accountant's check: the file's opening
+// balance plus its rows gives today's balance, row by row.
+
+const AQUA = { asset_type: "credit_alphanum4", asset_code: "AQUA", asset_issuer: BOB };
+const fromS = (v) => `${v < 0n ? "-" : ""}${(v < 0n ? -v : v) / 10_000_000n}.${String((v < 0n ? -v : v) % 10_000_000n).padStart(7, "0")}`;
+
+/** A Horizon account holding `held` ({ XLM, USDC, "pool shares", AQUA }), last changed at `ledgers`. */
+function accountHolding(held, ledgers = {}) {
+  const at = (k) => ledgers[k] ?? 60_000_001;
+  const balances = [{ asset_type: "native", balance: held.XLM }];
+  if (held.USDC != null) balances.push({ ...USDC, balance: held.USDC, last_modified_ledger: at("USDC") });
+  if (held["pool shares"] != null) balances.push({ asset_type: "liquidity_pool_shares", liquidity_pool_id: POOL, balance: held["pool shares"], last_modified_ledger: at("pool shares") });
+  if (held.AQUA != null) balances.push({ ...AQUA, balance: held.AQUA, last_modified_ledger: at("AQUA") });
+  return { last_modified_ledger: at("XLM"), balances };
+}
+
+/** Checks every row's balance_after: the opening balance plus the rows up to it. */
+function assertRunning(r) {
+  const run = new Map(r.openingBalances.map((b) => [b.asset, toStroops(b.balance)]));
+  for (const row of r.rows) {
+    run.set(row.asset, run.get(row.asset) + toStroops(row.amount));
+    assert.equal(row.balance_after, fromS(run.get(row.asset)), `${row.type} ${row.amount} ${row.asset}`);
+  }
+  return run;
+}
+
+test("each row has the balance after it; from the account's creation everything starts at 0", async () => {
+  const h = richHistory();
+  const held = sums((await H.readHistory(ME, { page: h.page })).rows);
+  const r = await H.readHistory(ME, { page: h.page, account: async () => accountHolding(held) });
+  assert.deepEqual(r.openingBalances.map((b) => [b.asset, b.balance]), [["XLM", "0.0000000"], ["USDC", "0.0000000"], ["pool shares", "0.0000000"]]);
+  assertRunning(r);
+  assert.equal(r.rows.at(-1).balance_after, held.XLM, "the newest XLM row ends at today's balance");
+  assert.deepEqual(r.openingCheck, []);
+  assert.deepEqual(r.balancesMoved, []);
+});
+
+test("a history cut at a limit: the opening balance is what the wallet had before the file's first row", async () => {
+  const h = longHistory(450); // 10 XLM at creation, then 1,350 USDC in 1-USDC payments
+  const r = await H.readHistory(ME, { page: h.page, maxRows: 300, account: async () => accountHolding({ XLM: "9.9955000", USDC: "1350.0000000", AQUA: "42.0000000" }) });
+  assert.equal(r.complete, false);
+  const opening = Object.fromEntries(r.openingBalances.map((b) => [b.asset, b.balance]));
+  const usdcRows = r.rows.filter((x) => x.asset === "USDC").length;
+  assert.equal(opening.USDC, fromS(1350_0000000n - BigInt(usdcRows) * 10_000_000n), "today's less the file's rows");
+  assert.equal(opening.AQUA, "42.0000000", "held, with no rows in the file: unchanged over it");
+  const end = assertRunning(r);
+  assert.equal(fromS(end.get("USDC")), "1350.0000000");
+  assert.equal(fromS(end.get("XLM")), "9.9955000");
+  assert.deepEqual(r.openingCheck, [], "not from creation: nothing to check against");
+});
+
+test("an asset whose balance changed after the history was read gets no running balance, and is reported", async () => {
+  const h = richHistory(); // its newest transaction is in ledger 60,000,012
+  const held = sums((await H.readHistory(ME, { page: h.page })).rows);
+  const r = await H.readHistory(ME, { page: h.page, account: async () => accountHolding({ ...held, USDC: "999.0000000" }, { USDC: 60_000_013 }) });
+  assert.ok(r.rows.filter((x) => x.asset === "USDC").every((x) => x.balance_after === ""));
+  assert.equal(r.openingBalances.find((b) => b.asset === "USDC").balance, "");
+  assert.deepEqual(r.balancesMoved, [{ asset: "USDC", asset_id: USDC_ISSUER }]);
+  assert.ok(r.rows.filter((x) => x.asset === "XLM").every((x) => x.balance_after !== ""), "the others still have theirs");
+  assert.deepEqual(r.openingCheck, [], "an unknown balance isn't checked");
+});
+
+test("from the account's creation, an asset that doesn't start at 0 is reported: a change is missing", async () => {
+  const h = richHistory();
+  const held = sums((await H.readHistory(ME, { page: h.page })).rows);
+  const r = await H.readHistory(ME, { page: h.page, account: async () => accountHolding({ ...held, AQUA: "5.0000000" }) });
+  assert.deepEqual(r.openingCheck, [{ asset: "AQUA", asset_id: BOB, balance: "5.0000000" }]);
+});
+
+test("an asset no longer held ends at 0", async () => {
+  // 250 USDC in, then all of it out, then the trustline removed: no USDC balance now.
+  const h = history();
+  h.tx({ feeAccount: BOB, source: BOB, ops: [{ op: { type: "create_account", funder: BOB, account: ME }, effects: [{ type: "account_created", starting_balance: "10.0000000" }] }] });
+  h.tx({ feeAccount: BOB, source: BOB, ops: [{ op: { type: "payment", from: BOB, to: ME, ...USDC }, effects: [credited("250.0000000", USDC)] }] });
+  h.tx({ ops: [{ op: { type: "payment", from: ME, to: BOB, ...USDC }, effects: [debited("250.0000000", USDC)] }] });
+  const r = await H.readHistory(ME, { page: h.page, account: async () => accountHolding({ XLM: "9.9999900" }) });
+  assert.deepEqual(r.rows.filter((x) => x.asset === "USDC").map((x) => x.balance_after), ["250.0000000", "0.0000000"]);
+  assert.deepEqual(r.openingCheck, []);
+});
+
+test("when the balances can't be read, the rows still come, without a running balance", async () => {
+  const h = richHistory();
+  const r = await H.readHistory(ME, { page: h.page, account: async () => { throw new Error("Horizon 503"); } });
+  assert.ok(r.rows.length > 0);
+  assert.ok(r.rows.every((x) => x.balance_after === ""));
+  assert.equal(r.openingBalances, null);
+});
+
+test("XLM's last change is the account's own (its trustlines have theirs)", async () => {
+  const h = richHistory();
+  const held = sums((await H.readHistory(ME, { page: h.page })).rows);
+  const r = await H.readHistory(ME, { page: h.page, account: async () => accountHolding(held, { XLM: 60_000_013 }) });
+  assert.deepEqual(r.balancesMoved, [{ asset: "XLM", asset_id: "native" }]);
+  assert.ok(r.rows.filter((x) => x.asset === "XLM").every((x) => x.balance_after === ""));
+  assert.ok(r.rows.filter((x) => x.asset === "USDC").every((x) => x.balance_after !== ""));
+});
+
+test("a transaction that lands between the first pages of the effects and of the transactions doesn't skew a balance", async () => {
+  // The newest transaction (a 5 XLM payment out) is in the transactions'
+  // first page but not the effects': its fee is in the file, its payment
+  // isn't. XLM, changed in that ledger, gets no running balance.
+  const h = richHistory();
+  const held = sums((await H.readHistory(ME, { page: h.page })).rows);
+  h.tx({ ops: [{ op: { type: "payment", from: ME, to: BOB, amount: "5.0000000", ...XLM }, effects: [debited("5.0000000", XLM)] }] });
+  const late = h.effects.at(-1).paging_token;
+  const page = (k, c) => (k === "effects" ? h.page(k, c).filter((e) => e.paging_token !== late) : h.page(k, c));
+  const nowXlm = fromS(toStroops(held.XLM) - 50_000_100n);
+  const r = await H.readHistory(ME, { page, account: async () => accountHolding({ ...held, XLM: nowXlm }, { XLM: 60_000_013 }) });
+  assert.deepEqual(r.balancesMoved, [{ asset: "XLM", asset_id: "native" }]);
+  assert.ok(r.rows.filter((x) => x.asset === "XLM").every((x) => x.balance_after === ""), "blank, not 5 XLM off");
 });
