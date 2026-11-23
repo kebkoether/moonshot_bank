@@ -27,6 +27,8 @@
  * for borderline cases.
  */
 
+const { classicSupply } = require("./horizon-supply");
+
 const SUPPLY_NFT_CUTOFF = 100;             // assets with total supply <= this are candidate NFTs
 const HOLDERS_NFT_CUTOFF = 100;            // and few holders
 const TOML_FETCH_TIMEOUT_MS = 4000;        // don't hang the request on slow issuer sites
@@ -141,8 +143,29 @@ async function fetchToml(domain) {
 }
 
 /**
+ * Accounts with a trustline to the asset. Horizon's /assets record counts them
+ * by authorization state in `accounts`; releases before that split had a flat
+ * `num_accounts`. Null when the record has neither.
+ */
+function holdersOf(rec) {
+  const a = rec?.accounts;
+  if (a && typeof a === "object") {
+    const parts = [a.authorized, a.authorized_to_maintain_liabilities, a.unauthorized].filter((n) => n != null);
+    if (parts.length > 0 && parts.every((n) => Number.isInteger(n) && n >= 0)) return parts.reduce((x, y) => x + y, 0);
+    return null;
+  }
+  return Number.isInteger(rec?.num_accounts) ? rec.num_accounts : null;
+}
+
+/**
  * Fetch Horizon's /assets stats for one (code, issuer) so we can see
  * total supply and number of accounts holding the asset.
+ *
+ * Horizon no longer sends the flat `amount` and `num_accounts` this read: the
+ * supply is split by where it sits and the holders by authorization. Reading
+ * the old fields gave NaN and undefined, so supply and holders never counted:
+ * any asset held as one stroop or one unit scored as a "Maybe" NFT (VELO, at
+ * a supply of billions), and the large-supply reject never ran.
  */
 async function getAssetStats(horizon, code, issuer) {
   const key = `${code}:${issuer}`;
@@ -159,8 +182,8 @@ async function getAssetStats(horizon, code, issuer) {
     const rec = result.records?.[0] ?? null;
     const stats = rec
       ? {
-          amount: parseFloat(rec.amount),     // total supply in display units
-          numAccounts: rec.num_accounts,
+          amount: classicSupply(rec),         // total supply in display units, wherever it sits
+          numAccounts: holdersOf(rec),
           flags: rec.flags,
           tomlLink: rec._links?.toml?.href ?? null,
         }
@@ -268,8 +291,10 @@ async function classifyOne(horizon, bal) {
   const issuer = bal.asset_issuer;
   const balance = parseFloat(bal.balance);
 
-  // Skip clearly fungible holdings before doing any network work.
-  if (balance > 1000) return null;
+  // Skip clearly fungible holdings before doing any network work, and empty
+  // trustlines: nothing is held. (Once supply could be read, an empty
+  // trustline to an asset with no supply scored 0.6.)
+  if (balance > 1000 || !(balance > 0)) return null;
 
   const stats = await getAssetStats(horizon, code, issuer);
   const supply = stats?.amount ?? null;
@@ -320,5 +345,5 @@ async function classifyOne(horizon, bal) {
 module.exports = {
   resolveNfts,
   // Exported for tests
-  _internal: { parseStellarToml, scoreNftLikeness },
+  _internal: { parseStellarToml, scoreNftLikeness, holdersOf },
 };
