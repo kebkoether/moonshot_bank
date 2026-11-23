@@ -193,6 +193,8 @@ function _aquaTokenCode(s) {
 
 const AQUA_SCALE = 1e7; // ALL USD values in the Aquarius API are 7-dec fixed point
 
+const AQUARIUS_PAGE_TIMEOUT_MS = 20_000;
+
 async function fetchAquarius() {
   const pools = [];
   let total = Infinity;
@@ -201,11 +203,14 @@ async function fetchAquarius() {
   let allCount = 0;
 
   while (pools.length + 0 < total && page <= 6) {
+    // Each page has a time limit, and so does its body read (see fetchUpshift).
+    const signal = AbortSignal.timeout(AQUARIUS_PAGE_TIMEOUT_MS);
     const res = await fetch(`https://amm-api.aqua.network/pools/?page=${page}&size=100`, {
       headers: { "User-Agent": "StellarScope/1.0" },
+      signal,
     });
     if (!res.ok) throw new Error(`Aquarius HTTP ${res.status}`);
-    const data = await res.json();
+    const data = await untilAborted(res.json(), signal);
     total = data.total ?? 0;
     allCount = total;
     for (const p of data.items || []) {
@@ -991,11 +996,18 @@ async function fetchEtherfuse() {
   };
 }
 
+// The longest one fetcher may take before the loop moves on to the next.
+// The loop runs the fetchers one after another, so a fetcher that never
+// finished held every protocol at its last value until the server restarted.
+// Cold, on 2026-11-23: Soroswap 39 s and SushiSwap 29 s (both list their
+// pools from the chain first), Blend 14 s, Upshift 13 s, the rest under 5 s.
+const FETCH_DEADLINE_MS = 2 * 60_000;
+
 const FETCHERS = [
   { id: "blend", fn: fetchBlend, interval: 5 * 60_000 },
   { id: "aquarius", fn: fetchAquarius, interval: 60_000 },
-  { id: "soroswap", fn: fetchSoroswap, interval: 15 * 60_000 },
-  { id: "sushiswap", fn: fetchSushi, interval: 5 * 60_000 },
+  { id: "soroswap", fn: fetchSoroswap, interval: 15 * 60_000, deadline: 5 * 60_000 },
+  { id: "sushiswap", fn: fetchSushi, interval: 5 * 60_000, deadline: 5 * 60_000 },
   // Hourly: 13 MB per call, numbers that change daily (see fetchUpshift).
   // After a failure, try again in 5 minutes; the last good list is still served.
   { id: "upshift", fn: fetchUpshift, interval: 60 * 60_000, retryInterval: 5 * 60_000 },
@@ -1006,6 +1018,32 @@ const FETCHERS = [
 ];
 
 let _refreshing = false;
+// Fetchers still running past their deadline: id → their promise. One isn't
+// started again until it has finished, so a stuck one can't pile up.
+const _overdue = new Map();
+let _deadlineForTests = null;
+
+/** f.fn(), or a rejection once its deadline passes. */
+function _runWithDeadline(f) {
+  const ms = _deadlineForTests ?? f.deadline ?? FETCH_DEADLINE_MS;
+  const run = Promise.resolve().then(() => f.fn());
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      _overdue.set(f.id, run);
+      // Whatever it ends with is dropped: the next refresh reads afresh.
+      run.catch(() => {}).finally(() => _overdue.delete(f.id));
+      reject(new Error(`no answer within ${Math.round(ms / 1000)} s`));
+    }, ms);
+  });
+  return Promise.race([run, deadline]).finally(() => clearTimeout(timer));
+}
+
+/** Tests: one deadline for every fetcher (null: their own), and none overdue. */
+function _setDeadlineForTests(ms) {
+  _deadlineForTests = ms;
+  _overdue.clear();
+}
 
 // opts.only: refresh just these protocol ids (tests).
 async function refreshOnce(opts = {}) {
@@ -1020,9 +1058,14 @@ async function refreshOnce(opts = {}) {
       const due = !entry || Date.now() - (entry.lastAttempt || 0) >= wait;
       if (!due) continue;
       const prev = entry || {};
+      if (_overdue.has(f.id)) {
+        // Its last run is still going: keep the last good value, as after a failure.
+        cache.set(f.id, { ...prev, error: prev.error || "still waiting on the last refresh", lastAttempt: Date.now() });
+        continue;
+      }
       cache.set(f.id, { ...prev, lastAttempt: Date.now() });
       try {
-        const value = await f.fn();
+        const value = await _runWithDeadline(f);
         cache.set(f.id, { ts: Date.now(), value, error: null, lastAttempt: Date.now() });
       } catch (e) {
         const stale = prev.value && Date.now() - (prev.ts || 0) < STALE_GRACE;
@@ -1146,4 +1189,4 @@ function _resetForTests() {
   _refreshing = false;
 }
 
-module.exports = { start, getSnapshot, getProtocolDetail, refreshOnce, _resetForTests, MIN_POOL_TVL_USD };
+module.exports = { start, getSnapshot, getProtocolDetail, refreshOnce, _resetForTests, _setDeadlineForTests, MIN_POOL_TVL_USD };
