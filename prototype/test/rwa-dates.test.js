@@ -101,9 +101,13 @@ test("no yield, no yield date", () => {
   assert.equal(gold.yield7d, null);
   assert.equal(gold.asOf, null);
   assert.equal(gold.marketCapAsOf, today());
-  const pyusd = stats["pyusd-cccrwh"];
-  assert.equal(pyusd.asOf, null);
-  assert.equal(pyusd.marketCapAsOf, null);
+  // EURAU: a Soroban token with no yield, and here no supply read either.
+  // (Not PYUSD: it's a classic asset's contract, so it can have a Horizon
+  // market cap.)
+  const eurau = stats["eurau-cb44w7"];
+  assert.ok(eurau, "an asset on the tab");
+  assert.equal(eurau.asOf, null);
+  assert.equal(eurau.marketCapAsOf, null);
 });
 
 test("the page shows each date with its figure", () => {
