@@ -5156,7 +5156,8 @@
         const data = await res.json();
         const whales = data.whales || [];
         if (whales.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--text-muted); padding:20px;">No data available</td></tr>';
+          // `unavailable`: why there's no list (Stellar Expert now charges for holder lists).
+          tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">${escapeHtml(data.unavailable || "No data available")}</td></tr>`;
           return;
         }
         tbody.innerHTML = whales.map((w, i) => {
@@ -5187,7 +5188,7 @@
         const data = await res.json();
         const whales = data.whales || [];
         if (whales.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">No data available</td></tr>';
+          tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">${escapeHtml(data.unavailable || "No data available")}</td></tr>`;
           return;
         }
         tbody.innerHTML = whales.map((w, i) => {

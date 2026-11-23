@@ -1608,10 +1608,26 @@ const EXCLUDED_WHALES = new Set([
   "GBFZPAHO24P7ZVZCMI5SXZR53UYD325OWSSWWHHVLBNN56LU5YZJJFNP",
 ]);
 
+// Stellar Expert's holder lists aren't free any more: its API answers HTTP 402
+// Payment Required (x402, 0.02 USDC a request) for asset holders, accounts and
+// contracts. Both leaderboards on the home page come from those lists, so they
+// say this instead of "No data available".
+const SE_PAYMENT_REQUIRED = "Stellar Expert, which supplies the holder lists, now charges for them.";
+
+// The XLM leaderboard is kept 10 minutes. It was read afresh on every home
+// page visit: a Stellar Expert request and ten Horizon account loads.
+const WHALES_TTL = 10 * 60_000;
+let whalesCache = null; // { at, body }
+
 app.get("/api/v1/whales", sameOriginOnly, async (req, res) => {
+  if (whalesCache && Date.now() - whalesCache.at < WHALES_TTL) return res.json(whalesCache.body);
   try {
     // Fetch extra to have enough after filtering
     const response = await fetch("https://api.stellar.expert/explorer/public/asset/XLM/holders?order=desc&limit=40");
+    if (response.status === 402) {
+      whalesCache = { at: Date.now(), body: { whales: [], unavailable: SE_PAYMENT_REQUIRED } };
+      return res.json(whalesCache.body);
+    }
     const data = await response.json();
     const records = data._embedded?.records || [];
 
@@ -1630,6 +1646,7 @@ app.get("/api/v1/whales", sameOriginOnly, async (req, res) => {
       return { address: a.address, balance: xlmBalance, assetCount };
     }));
 
+    if (whales.length) whalesCache = { at: Date.now(), body: { whales } };
     res.json({ whales });
   } catch (e) {
     console.error("Whales error:", e.message);
@@ -1651,6 +1668,7 @@ const PORTFOLIO_WHALE_TTL = 30 * 60 * 1000; // 30 minutes
 
 let portfolioWhaleCache = null;
 let portfolioWhaleComputing = false;
+let holdersPaymentRequired = false; // set by fetchAssetHolders during a compute
 let btcPriceUSD = 80000; // updated live before each compute run
 
 async function refreshBTCPrice() {
@@ -1671,6 +1689,7 @@ async function fetchAssetHolders(asset) {
     const res = await fetch(
       `https://api.stellar.expert/explorer/public/asset/${id}/holders?order=desc&limit=200`
     );
+    if (res.status === 402) holdersPaymentRequired = true;
     if (!res.ok) return [];
     const data = await res.json();
     const records = data._embedded?.records || [];
@@ -1753,6 +1772,7 @@ async function fetchClassicTrackedPrices() {
 async function computePortfolioWhales() {
   if (portfolioWhaleComputing) return;
   portfolioWhaleComputing = true;
+  holdersPaymentRequired = false;
   try {
     await refreshBTCPrice();
 
@@ -1763,6 +1783,14 @@ async function computePortfolioWhales() {
       fetchClassicTrackedPrices(),
     ]);
     console.log(`[portfolio-whales] Classic prices fetched: ${classicPrices.size} assets`);
+
+    // No holder list at all, because Stellar Expert asked for payment: say
+    // why there's no leaderboard.
+    if (holderLists.every((l) => l.length === 0) && holdersPaymentRequired) {
+      console.warn("[portfolio-whales] Stellar Expert answered 402 Payment Required for every holder list");
+      portfolioWhaleCache = { whales: [], computedAt: new Date().toISOString(), unavailable: SE_PAYMENT_REQUIRED };
+      return;
+    }
 
     // Step 2: build candidate map — address → soroban balances
     // Also union all G... addresses into a candidate set
@@ -1837,6 +1865,7 @@ app.get("/api/v1/portfolio-whales", sameOriginOnly, async (req, res) => {
     whales: portfolioWhaleCache.whales,
     computedAt: portfolioWhaleCache.computedAt,
     refreshing: portfolioWhaleComputing,
+    ...(portfolioWhaleCache.unavailable ? { unavailable: portfolioWhaleCache.unavailable } : {}),
   });
 });
 
