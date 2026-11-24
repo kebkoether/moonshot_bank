@@ -30,6 +30,8 @@ const SEED = [
   { coingeckoId: "usdt0", symbol: "USDT0", kind: "classic", code: "USDT0", issuer: "GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q" },
   { coingeckoId: "safo", symbol: "SAFO", kind: "soroban", contractId: "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX" },
   { coingeckoId: "societe-generale-forge-eurcv", symbol: "EURCV", kind: "soroban", contractId: "CANKBYNNAYKEZXLB655F2UPNTAZFK5HILZUXL7ZTFR3NF6LKDSVY7KFH" },
+  // EURCV is a classic asset too: the contract above is its Stellar Asset Contract.
+  { coingeckoId: "societe-generale-forge-eurcv", symbol: "EURCV", kind: "classic", code: "EURCV", issuer: "GCEYGIVOLAVBF2TG2RUSGTUJCIN75KEX3NGLMY4VPL4GFE5L355AXW3G" },
   { coingeckoId: "solv-btc", symbol: "SOLVBTC", kind: "soroban", contractId: "CBIJBDNZNF4X35BJ4FFZWCDBSCKOP5NB4PLG4SNENRMLAPYG4P5FM6VN" },
   { coingeckoId: "solv-protocol-solvbtc-bbn", symbol: "XSOLVBTC", kind: "soroban", contractId: "CAUP7NFABXE5TJRL3FKTPMWRLC7IAXYDCTHQRFSCLR5TMGKHOOQO772J" },
   { coingeckoId: "spiko-amundi-overnight-swap-fund-chf", symbol: "CHFSAFO", kind: "soroban", contractId: "CAJD2IBSP7VO2VYJQUYJSOGPJINTUYV7MQITINXVPTIH3CCLCUENNMW4" },

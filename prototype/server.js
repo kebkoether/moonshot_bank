@@ -1137,8 +1137,11 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
           if (fresh.asOf) entry.asOf = fresh.asOf;
         }
         // Layer 2: live Horizon market cap (classic assets only) — overrides curated
-        if (a.issuer && a.code) {
-          const live = await fetchClassicMarketCap(a.code, a.issuer, xlmPrice);
+        // A Stellar Asset Contract (USDC, PYUSD, EURCV) is its classic asset:
+        // the catalog lists it by contractId, with the asset's classicIssuer.
+        const classicIssuer = a.issuer || a.classicIssuer;
+        if (classicIssuer && a.code) {
+          const live = await fetchClassicMarketCap(a.code, classicIssuer, xlmPrice);
           if (live) {
             entry.supplyTokens = live.supply;
             if (live.marketCapUSD) {

@@ -472,7 +472,7 @@ const SOROBAN_TVL_TOKENS = [
     decimals: 8,  priceLabel: "BTC spot",  priceFn: () => _priceCache.btcUsd,
   },
   {
-    slug: "euraud-cb44w7",   contractId: "CB44W727WSLHPXJ47A6DHF5D34RKWSOZAMEDXO3CF5TEEEQ2ZX4V3VRI",
+    slug: "eurau-cb44w7",    contractId: "CB44W727WSLHPXJ47A6DHF5D34RKWSOZAMEDXO3CF5TEEEQ2ZX4V3VRI",
     decimals: 6,  priceLabel: "EUR/USD",   priceFn: () => _priceCache.eurUsd,
   },
 ];
