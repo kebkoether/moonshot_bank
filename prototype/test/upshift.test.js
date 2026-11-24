@@ -201,3 +201,24 @@ test("a vault without convert_to_assets is still valued 1:1", async () => {
   const [p] = await Upshift.getPositions(wallet().publicKey(), ctx);
   assert.equal(p.valueUSD, 1000);
 });
+
+// ── APY ─────────────────────────────────────────────────────────────────────
+
+test("a position's APY is the one Upshift shows: its window, plus a campaign's top-up", async () => {
+  // Gami earnUSDC on 2026-11-24: 3.38% over 30 days, topped up to 10.00%.
+  const gami = {
+    ...apiVault(SENT_USDC, "USDC", "earnUSDC", 0.0301),
+    historical_apy: { 1: 0.0768, 7: 0.0301, 30: 0.0338 },
+    default_apy_horizon: 30,
+    campaign_apy: 6.62,
+    apy_override: { is_campaign_apy_target_top_up: true },
+  };
+  respond = (resolve) => resolve(ok([gami]));
+  shares.set(SENT_USDC, 1_000n);
+  const user = wallet().publicKey();
+  await Upshift.getPositions(user, ctx);
+  await Upshift._vaultListSettled?.();
+  const [pos] = await Upshift.getPositions(user, ctx);
+  assert.ok(Math.abs(pos.yield.apy - 10.0) < 1e-9, `${pos.yield.apy}`);
+  assert.equal(pos.yield.apyDays, 30);
+});
