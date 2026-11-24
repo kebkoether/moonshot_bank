@@ -492,70 +492,130 @@ app.get("/api/v1/account/:address", async (req, res) => {
 });
 
 // Transaction history
+// Two kinds of operation other accounts send a wallet unasked are left out
+// of the Transactions tab unless asked for (?all=1):
+// - "dust": an incoming XLM payment under DUST_XLM. On 2026-11-24 one
+//   wallet's latest 200 payments were all 0.0000001 or 0.0001 XLM, from
+//   dozens of senders, several of them look-alike addresses (the same last
+//   four characters). That's address poisoning: the sender hopes the owner
+//   copies its address from the history instead of the real one.
+// - "claimable": a claimable balance another account created for it (the
+//   same wallet's next 31: 0.003 to 0.01 of tokens like AVLX, VTRX, NXR).
+//   Those still unclaimed are on the Claimable tab.
+// The tab shows the 30 latest operations, so it showed nothing else.
+const DUST_XLM = 0.01;
+// Horizon pages of 200 read at most to fill one page of the tab.
+const HISTORY_SCAN_PAGES = 5;
+
+/** "dust", "claimable", or null for an operation the wallet's history shows. */
+function unsolicitedKind(op, address) {
+  if (op.type === "payment" && op.to === address && op.from !== address
+    && op.asset_type === "native" && parseFloat(op.amount) < DUST_XLM) return "dust";
+  if (op.type === "create_claimable_balance" && op.source_account !== address) return "claimable";
+  return null;
+}
+
+function historyRecord(op) {
+  return {
+    id: op.id,
+    type: op.type,
+    createdAt: op.created_at,
+    transactionHash: op.transaction_hash,
+    ...(op.type === "payment" && {
+      from: op.from,
+      to: op.to,
+      amount: op.amount,
+      assetCode: op.asset_code || "XLM",
+      assetIssuer: op.asset_issuer || null,
+    }),
+    ...(op.type === "path_payment_strict_receive" && {
+      from: op.from,
+      to: op.to,
+      amount: op.amount,
+      sourceAmount: op.source_amount,
+      assetCode: op.asset_code || "XLM",
+      sourceAssetCode: op.source_asset_code || "XLM",
+    }),
+    ...(op.type === "manage_sell_offer" && {
+      offerId: op.offer_id,
+      amount: op.amount,
+      price: op.price,
+      buyingAsset: op.buying_asset_code || "XLM",
+      sellingAsset: op.selling_asset_code || "XLM",
+    }),
+    ...(op.type === "create_account" && {
+      account: op.account,
+      startingBalance: op.starting_balance,
+      funder: op.funder,
+    }),
+    ...(op.type === "change_trust" && {
+      assetCode: op.asset_code,
+      assetIssuer: op.asset_issuer,
+      limit: op.limit,
+    }),
+  };
+}
+
 app.get("/api/v1/account/:address/history", async (req, res) => {
   try {
     const { address } = req.params;
-    const h = getHorizon();
+    const h = _deps.getHorizon();
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const cursor = req.query.cursor || undefined;
 
-    let query = h.operations().forAccount(address).order("desc").limit(limit);
-    if (cursor) query = query.cursor(cursor);
+    if (req.query.all === "1") {
+      let query = h.operations().forAccount(address).order("desc").limit(limit);
+      if (cursor) query = query.cursor(cursor);
+      const operations = await query.call();
+      const history = operations.records.map(historyRecord);
+      return res.json({
+        address,
+        count: history.length,
+        cursor: operations.records.length > 0
+          ? operations.records[operations.records.length - 1].paging_token
+          : null,
+        history,
+        hidden: { dust: 0, claimable: 0 },
+      });
+    }
 
-    const operations = await query.call();
-
-    const history = operations.records.map((op) => ({
-      id: op.id,
-      type: op.type,
-      createdAt: op.created_at,
-      transactionHash: op.transaction_hash,
-      ...(op.type === "payment" && {
-        from: op.from,
-        to: op.to,
-        amount: op.amount,
-        assetCode: op.asset_code || "XLM",
-        assetIssuer: op.asset_issuer || null,
-      }),
-      ...(op.type === "path_payment_strict_receive" && {
-        from: op.from,
-        to: op.to,
-        amount: op.amount,
-        sourceAmount: op.source_amount,
-        assetCode: op.asset_code || "XLM",
-        sourceAssetCode: op.source_asset_code || "XLM",
-      }),
-      ...(op.type === "manage_sell_offer" && {
-        offerId: op.offer_id,
-        amount: op.amount,
-        price: op.price,
-        buyingAsset: op.buying_asset_code || "XLM",
-        sellingAsset: op.selling_asset_code || "XLM",
-      }),
-      ...(op.type === "create_account" && {
-        account: op.account,
-        startingBalance: op.starting_balance,
-        funder: op.funder,
-      }),
-      ...(op.type === "change_trust" && {
-        assetCode: op.asset_code,
-        assetIssuer: op.asset_issuer,
-        limit: op.limit,
-      }),
-    }));
-
+    // Leave those out, reading further back (up to HISTORY_SCAN_PAGES pages)
+    // to fill the page. The cursor is the last operation looked at, so the
+    // next page picks up right after it.
+    const kept = [];
+    const hidden = { dust: 0, claimable: 0 };
+    let last = null;
+    let next = cursor;
+    let pages = 0;
+    for (; pages < HISTORY_SCAN_PAGES && kept.length < limit; pages++) {
+      let query = h.operations().forAccount(address).order("desc").limit(200);
+      if (next) query = query.cursor(next);
+      const page = await query.call();
+      for (const op of page.records) {
+        last = op;
+        const kind = unsolicitedKind(op, address);
+        if (kind) hidden[kind]++;
+        else kept.push(op);
+        if (kept.length === limit) break;
+      }
+      if (page.records.length < 200 || !last) break; // the start of the history
+      next = last.paging_token;
+    }
+    const history = kept.map(historyRecord);
     res.json({
       address,
       count: history.length,
-      cursor: operations.records.length > 0
-        ? operations.records[operations.records.length - 1].paging_token
-        : null,
+      cursor: last ? last.paging_token : null,
       history,
+      hidden,
+      dustBelowXLM: DUST_XLM,
     });
   } catch (e) {
     console.error("History fetch error:", e.message);
     res.status(500).json({ error: "Failed to fetch transaction history" });
   }
 });
+
 
 // The wallet's whole history, one row per balance change
 // (lib/history-export.js): as far back as Horizon keeps it, up to 10,000 rows.

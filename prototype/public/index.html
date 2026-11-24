@@ -1617,6 +1617,7 @@
     .history-export { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
     .history-export-status { color: var(--text-secondary); font-size: 13px; flex: 1 1 260px; }
     .history-export-status.error { color: var(--red); }
+    .history-dust { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; color: var(--text-secondary); font-size: 13px; }
 
     .tx-row {
       display: grid;
@@ -4973,6 +4974,10 @@
     let currentTab = "tokens";
     let currentAggTab = "tokens";
     let historyData = null;
+    // The Transactions tab leaves out what other accounts send a wallet
+    // unasked (tiny XLM payments, claimable balances: spam, often address
+    // poisoning) unless the viewer asks to see them.
+    let historyShowAll = false;
     let historyExport = null; // { key (address or "all"), count, busy, message, error }: the history CSV download
     let claimableData = null;
     let nftsData = null;
@@ -5698,6 +5703,11 @@
           break;
         case "download-all-history-csv":
           downloadAllHistoryCsv();
+          break;
+        case "toggle-history-dust":
+          historyShowAll = !historyShowAll;
+          historyData = null;
+          renderTabContent();
           break;
 
         // Cramer overlay. The backdrop closes only on a click on itself, not
@@ -7672,7 +7682,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       if (!historyData) {
         container.innerHTML = '<div class="loading"><div class="spinner"></div><div style="color:var(--text-secondary)">Loading history...</div></div>';
         try {
-          const res = await fetch(`${API_BASE}/api/v1/account/${currentData.address}/history?limit=30`);
+          const res = await fetch(`${API_BASE}/api/v1/account/${currentData.address}/history?limit=30${historyShowAll ? "&all=1" : ""}`);
           historyData = await res.json();
         } catch (e) {
           container.innerHTML = '<div class="error-banner">Failed to load history</div>';
@@ -7680,12 +7690,14 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         }
       }
 
-      if (!historyData.history || historyData.history.length === 0) {
+      const hidden = historyData.hidden || {};
+      if ((!historyData.history || historyData.history.length === 0) && !(hidden.dust > 0 || hidden.claimable > 0)) {
         container.innerHTML = '<div class="empty-state">No transaction history</div>';
         return;
       }
 
       let html = historyExportBar(currentData.address) + '<div class="tx-list">';
+      html += historyHiddenNote(historyData);
       historyData.history.forEach((tx) => {
         const typeClass = ["payment", "create_account", "change_trust", "manage_sell_offer", "manage_buy_offer", "path_payment_strict_receive", "path_payment_strict_send"].includes(tx.type) ? tx.type : "default";
         const typeLabel = tx.type.replace(/_/g, " ");
@@ -7732,6 +7744,25 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
     // one wallet per request; public/history-csv.js builds the file. The tab
     // itself shows only the latest 30.
     const HISTORY_EXPORT_HINT = "One row per balance change (payments, swaps, trades, pool and DeFi transfers, network fees), as far back as Horizon keeps history.";
+
+    /** The line above the Transactions list about what was left out. */
+    function historyHiddenNote(data) {
+      if (historyShowAll) {
+        return `<div class="history-dust">Showing everything, including tiny payments and claimable balances other accounts sent.
+          <button class="btn btn-secondary" data-action="toggle-history-dust">Hide them</button></div>`;
+      }
+      const dust = Number(data.hidden?.dust) || 0;
+      const claimable = Number(data.hidden?.claimable) || 0;
+      if (dust + claimable === 0) return "";
+      const below = Number(data.dustBelowXLM) || 0.01;
+      const parts = [];
+      if (dust) parts.push(`${dust} incoming payment${dust === 1 ? "" : "s"} under ${below} XLM`);
+      if (claimable) parts.push(`${claimable} claimable balance${claimable === 1 ? "" : "s"} other accounts created (see Claimable)`);
+      const none = !(data.history && data.history.length) ? " Nothing else in the latest operations." : "";
+      return `<div class="history-dust" title="Wallets get sent tiny amounts from look-alike addresses, hoping one is copied from the history by mistake (address poisoning). Always check the whole address.">
+          Hiding ${parts.join(" and ")}: usually spam, often from look-alike addresses.${none}
+          <button class="btn btn-secondary" data-action="toggle-history-dust">Show them</button></div>`;
+    }
 
     /** key: a wallet's address, or "all" for All Wallets. */
     function historyExportBar(key, count) {
