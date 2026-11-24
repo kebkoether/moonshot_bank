@@ -38,6 +38,7 @@ const pricingEngine = require("./pricing-engine");
 const BlendAdapter = require("./adapters/blend");
 const StellarSdk = require("@stellar/stellar-sdk");
 const { untilAborted } = require("./until-aborted");
+const { upshiftApy } = require("./upshift-apy");
 const { Address, nativeToScVal, scValToNative } = StellarSdk;
 
 // ── Config ──────────────────────────────────────────────────────────────────
@@ -559,19 +560,23 @@ async function fetchUpshift() {
   for (const v of vaults) {
     const tvl = Number(v.tvl || v.latest_reported_tvl || 0); // USD (verified)
     totalTvl += tvl;
-    const apy = Number(v.reported_apy?.apy ?? 0) || null;
+    // The Total APY Upshift shows (lib/upshift-apy.js). reported_apy, which
+    // this used, only the Gami vaults have.
+    const shown = upshiftApy(v);
     const meta = v.stellar_vault_metadata || {};
     const depositSym = meta.deposit_token_symbol || "?";
     pools.push({
       assets: [depositSym],
       name: v.vault_name,
       tvlUSD: tvl,
-      apy,
+      apy: shown ? shown.apy : null,
+      apyDays: shown ? shown.days : null,
       rewardApy: 0,
       address: v.address,
       url: "https://app.upshift.finance",
       note: `Single-asset vault — deposit ${depositSym}, receive shares that grow ` +
-        `as the strategy earns. No pair management needed.`,
+        `as the strategy earns. No pair management needed.` +
+        (shown ? ` APY: Upshift's Total APY over ${shown.days} days.` : ""),
     });
   }
   pools.sort((a, b) => b.tvlUSD - a.tvlUSD);

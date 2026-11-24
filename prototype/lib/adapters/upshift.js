@@ -25,6 +25,7 @@
 const { getTokenBalanceStrict, simulateContractCall, isTransientRpcError } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
 const { untilAborted } = require("../until-aborted");
+const { upshiftApy } = require("../upshift-apy");
 const { nativeToScVal, scValToNative } = StellarSdk;
 
 const UPSHIFT_API_BASE = "https://api.upshift.finance/v1";
@@ -172,11 +173,10 @@ async function getVaultPosition(vault, userAddress, priceCtx) {
   }
   const valueUSD = currentAssetUnits * depositPriceUSD;
 
-  // APY: prefer 7-day, fall back to 30-day, then 1-day. (A built-in vault
-  // has none until the API's list arrives.)
-  const apyMap = vault.historical_apy || {};
-  const apyFraction = apyMap["7"] ?? apyMap["30"] ?? apyMap["1"] ?? null;
-  const apyPercent = apyFraction != null ? apyFraction * 100 : null;
+  // APY as Upshift shows it (lib/upshift-apy.js). A built-in vault has none
+  // until the API's list arrives.
+  const shown = upshiftApy(vault);
+  const apyPercent = shown ? shown.apy * 100 : null;
 
   return {
     protocol: "upshift",
@@ -195,6 +195,7 @@ async function getVaultPosition(vault, userAddress, priceCtx) {
       accrued: fmtTokenAmount(accruedUnits),
       asset: depositSymbol,
       apy: apyPercent,
+      apyDays: shown ? shown.days : null,
     },
     valueUSD,
   };
