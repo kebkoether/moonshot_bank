@@ -22,6 +22,7 @@ const snapshotScheduler = require("./lib/snapshot-scheduler");
 const rwaYieldFetcher = require("./lib/rwa-yield-fetcher");
 const K2Adapter = require("./lib/adapters/k2");
 const defiExplorer = require("./lib/defi-explorer");
+const { dropFallbackLpDuplicates } = require("./lib/lp-duplicates");
 const fxEfficiency = require("./lib/fx-efficiency");
 const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
@@ -214,6 +215,7 @@ async function collectDefiPositions(address, xlmPrice) {
     )
   );
 
+  const entries = []; // { adapter, positions, stale }, one per adapter that answered
   results.forEach((r, i) => {
     const name = configured[i].name || "adapter";
     const cacheKey = `${address}:${name}`;
@@ -236,10 +238,7 @@ async function collectDefiPositions(address, xlmPrice) {
       }
     }
 
-    for (const pos of positions) {
-      totalUSD += pos.valueUSD || 0;
-      defiPositions.push(stale ? { ...pos, stale: true } : pos);
-    }
+    entries.push({ adapter: configured[i], positions, stale });
     // Adapters may attach grouped pool data via the __blendPoolGroups
     // property — pass through for the per-pool table. (Groups carry their
     // own protocol id; "blend" is only the default for legacy groups.)
@@ -249,6 +248,14 @@ async function collectDefiPositions(address, xlmPrice) {
       }
     }
   });
+
+  // A pool LP Positions found that another adapter reports counts once.
+  for (const { positions, stale } of dropFallbackLpDuplicates(entries)) {
+    for (const pos of positions) {
+      totalUSD += pos.valueUSD || 0;
+      defiPositions.push(stale ? { ...pos, stale: true } : pos);
+    }
+  }
 
   return { defiPositions, defiByPool, totalUSD, degraded };
 }
@@ -1961,6 +1968,7 @@ async function fetchPortfolioForScheduler(address) {
       withTimeout(a.getPositions(address, { xlmPrice }), SNAPSHOT_ADAPTER_TIMEOUT_MS, a.name || "adapter")
     )
   );
+  const entries = [];
   results.forEach((r, i) => {
     const name = configured[i].name || "adapter";
     if (r.status === "rejected") {
@@ -1968,11 +1976,15 @@ async function fetchPortfolioForScheduler(address) {
       defiDegraded.push(name);
       return;
     }
-    for (const pos of r.value || []) {
+    entries.push({ adapter: configured[i], positions: r.value || [] });
+  });
+  // A pool LP Positions found that another adapter reports counts once.
+  for (const { positions } of dropFallbackLpDuplicates(entries)) {
+    for (const pos of positions) {
       totalValueUSD += pos.valueUSD || 0;
       defiPositions.push(pos);
     }
-  });
+  }
 
   return {
     address,

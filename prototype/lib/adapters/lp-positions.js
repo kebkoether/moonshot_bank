@@ -379,6 +379,9 @@ const LPPositionsAdapter = {
   protocolId: "lp-positions",
   name: "LP Positions",
   type: "dex",
+  // The catch-all: a pool another adapter also reports is counted from that
+  // adapter only (lib/lp-duplicates.js).
+  lpFallback: true,
 
   isConfigured() {
     return true; // auto-discovery means we're always configured
