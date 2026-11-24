@@ -90,7 +90,9 @@ test("balances: the asset's issuer or contract, the amount as given, and 'no pri
     ["SPAM", "5000", "GB2LKTNIJQ2X5NHSVFNFYYYCYBPZRDXL6PGMVOWLBZ7Q4UWXKHFCDNPO", "0.00", "no price"],
   ]);
   const lp = parse(H.build([WALLET_A], { asOf: AS_OF })).find((r) => r.venue === "Stellar AMM");
-  assert.deepEqual([lp.side, lp.asset_1, lp.amount_1, lp.asset_1_id], ["liquidity pool", "pool shares", "0.4351714", WALLET_A.balances[4].poolId]);
+  // No Stellar AMM position for its pool here (not read), so the shares keep their 0 and say so.
+  assert.deepEqual([lp.side, lp.asset_1, lp.amount_1, lp.asset_1_id, lp.value_usd, lp.notes],
+    ["pool shares", "pool shares", "0.4351714", WALLET_A.balances[4].poolId, "0.00", "not valued: the pool couldn't be read"]);
 });
 
 test("DeFi: venue, pool or vault, each asset (borrowed negative), and the position's value", () => {
