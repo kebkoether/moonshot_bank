@@ -23,6 +23,7 @@
   ];
 
   const VENUES = {
+    "stellar-amm": "Stellar AMM",
     blend: "Blend", k2: "K2 Lend", aquarius: "Aquarius", soroswap: "Soroswap",
     "sushiswap-v3": "SushiSwap V3", upshift: "Upshift", sentora: "Stellar DeFi Hub (Sentora)",
     templar: "Templar Finance", "solv-protocol": "Solv Protocol",
@@ -58,11 +59,16 @@
     return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
 
-  function balanceRow(b) {
+  function balanceRow(b, pools) {
     const a = b.asset || {};
     if (b.type === "lp_share") {
-      return { venue: "Stellar AMM", side: "liquidity pool", value_usd: usd(b.valueUSD),
-        legs: [{ asset: "pool shares", amount: num(b.shares), id: b.poolId }] };
+      // Its Stellar AMM position (the pool's assets and their value) has a
+      // row of its own, with the DeFi positions.
+      const pos = pools && pools.get(b.poolId);
+      return { venue: "Stellar AMM", position: pos ? pos.poolName : "", side: "pool shares",
+        value_usd: pos ? "" : usd(b.valueUSD),
+        legs: [{ asset: "pool shares", amount: num(b.shares), id: b.poolId }],
+        notes: pos ? "the assets these shares give, and their value, are in the liquidity pool row" : "not valued: the pool couldn't be read" };
     }
     const native = b.type === "native";
     return {
@@ -132,7 +138,8 @@
 
   function walletRows(w) {
     const rows = [];
-    for (const b of w.balances || []) rows.push(balanceRow(b));
+    const pools = new Map((w.defiPositions || []).filter((p) => p.protocol === "stellar-amm").map((p) => [p.poolId, p]));
+    for (const b of w.balances || []) rows.push(balanceRow(b, pools));
     for (const p of w.defiPositions || []) rows.push(...positionRows(p));
     for (const g of w.defiByPool || []) {
       if (g.protocol && g.protocol !== "blend") continue;

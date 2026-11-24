@@ -6672,6 +6672,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
     // of each asset, and the USD value, largest first. Snapshots taken
     // before positions were kept with them have only the count.
     const TIME_TRAVEL_PROTOCOL_NAMES = {
+      "stellar-amm": "Stellar AMM",
       blend: "Blend", k2: "K2 Lend", templar: "Templar Finance", upshift: "Upshift",
       sentora: "Stellar DeFi Hub (Sentora)", aquarius: "Aquarius", soroswap: "Soroswap",
       "sushiswap-v3": "SushiSwap V3", "solv-protocol": "Solv Protocol",
@@ -6795,6 +6796,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const lpShares = d.balances.filter((b) => b.type === "lp_share");
       const pricedTokens = tokens.filter((b) => b.valueUSD > 0);
       const defiPositions = d.defiPositions || [];
+      // A classic pool is both a share trustline (lpShares) and, once read,
+      // a Stellar AMM position: count it once.
+      const sorobanDefi = defiPositions.filter((p) => p.protocol !== "stellar-amm");
       const sorobanTokens = d.balances.filter((b) => b.type === "soroban_token");
 
       // Build breakdown bar
@@ -6862,8 +6866,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           </div>
           <div class="stat-card">
             <div class="stat-label">LP / DeFi</div>
-            <div class="stat-value">${lpShares.length + defiPositions.length}</div>
-            <div class="stat-sub">${lpShares.length} classic LP${defiPositions.length ? `, ${defiPositions.length} Soroban` : ""}</div>
+            <div class="stat-value">${lpShares.length + sorobanDefi.length}</div>
+            <div class="stat-sub">${lpShares.length} classic LP${sorobanDefi.length ? `, ${sorobanDefi.length} Soroban` : ""}</div>
           </div>
           ${sorobanTokens.length > 0 ? `
           <div class="stat-card">
@@ -7166,6 +7170,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           : pos.protocol === "templar" ? "templar" : "default";
         const protocolLabel = pos.protocol === "sushiswap-v3" ? (pos.poolName || "SushiSwap V3")
           : pos.protocol === "solv-protocol" ? "Solv Protocol"
+          : pos.protocol === "stellar-amm" ? (pos.poolName || "Stellar AMM")
           : pos.protocol === "upshift" ? (pos.vaultName ? `Upshift · ${pos.vaultName}` : "Upshift")
           : pos.protocol === "aquarius" ? (pos.poolName || "Aquarius")
           : pos.protocol === "soroswap" ? (pos.poolName || "Soroswap")

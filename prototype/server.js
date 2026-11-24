@@ -21,6 +21,7 @@ const SentoraAdapter = require("./lib/adapters/sentora");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const rwaYieldFetcher = require("./lib/rwa-yield-fetcher");
 const K2Adapter = require("./lib/adapters/k2");
+const ClassicPoolsAdapter = require("./lib/adapters/classic-pools");
 const defiExplorer = require("./lib/defi-explorer");
 const fxEfficiency = require("./lib/fx-efficiency");
 const createPublicApiRoutes = require("./lib/public-api-routes");
@@ -165,6 +166,8 @@ const PROTOCOL_ADAPTERS = [
   SentoraAdapter,
   LPDiscoveryAdapter,
   LPPositionsAdapter,
+  // Stellar's built-in AMM pools: the wallet's pool-share trustlines.
+  ClassicPoolsAdapter,
 ];
 
 // Query every configured protocol adapter for a wallet's DeFi positions —
