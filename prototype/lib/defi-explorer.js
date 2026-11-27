@@ -114,7 +114,8 @@ const PROTOCOL_META = {
     blurb:
       "Institutional DeFi infrastructure (part of the Stellar DeFi Hub initiative). " +
       "Three vaults take XLM, USDC or PYUSD deposits under a principal-escrow design, " +
-      "each paying a reward rate published by Sentora and claimable at term end.",
+      "each paying a reward rate published by Sentora for a fixed-term campaign, " +
+      "claimable when the campaign ends.",
   },
   templar: {
     id: "templar",
@@ -598,6 +599,16 @@ const SENTORA_VAULTS = [
 ];
 const SENTORA_URL = "https://stellardefihub.com/vaults";
 
+// A campaign's last day is endsOn (UTC). After it the vault pays no reward
+// on new deposits: Sentora marks it "Campaign Complete · Rewards Claimable".
+// The contracts hold no rate or term (they only take deposits and
+// withdrawals), so the card can only tell from these dates. The card used
+// to quote 5% and 8% for all three after their campaigns ended (XLM on
+// 2026-11-09, USDC and PYUSD on 2026-11-19).
+function sentoraCampaignEnded(v, now = Date.now()) {
+  return now >= Date.parse(`${v.endsOn}T00:00:00Z`) + 24 * 60 * 60_000;
+}
+
 async function fetchSentora() {
   const pools = [];
   let totalTvl = 0;
@@ -618,15 +629,21 @@ async function fetchSentora() {
       assets: [v.asset],
       name: `Sentora ${v.asset} Vault`,
       tvlUSD: tvl,
-      // Sentora's published reward rate, not an on-chain derivation.
-      apy: v.rewardRate,
+      // Sentora's published reward rate, not an on-chain derivation, and
+      // only while its campaign runs.
+      apy: sentoraCampaignEnded(v) ? null : v.rewardRate,
       apySource: "quoted",
       rewardApy: 0,
       address: v.vault,
       url: SENTORA_URL,
-      note: `Deposit ${v.asset} for a ${(v.rewardRate * 100).toFixed(2)}% reward rate ` +
-        `published by Sentora, paid in ${v.asset} and claimable at term end ` +
-        `(${v.endsOn}). Early withdrawal forfeits accrued rewards.`,
+      campaignEndedOn: sentoraCampaignEnded(v) ? v.endsOn : null,
+      note: sentoraCampaignEnded(v)
+        ? `Campaign ended ${v.endsOn}: new ${v.asset} deposits don't earn the ` +
+          `${(v.rewardRate * 100).toFixed(2)}% reward. Rewards earned in the campaign ` +
+          `are claimable on the Stellar DeFi Hub.`
+        : `Deposit ${v.asset} for a ${(v.rewardRate * 100).toFixed(2)}% reward rate ` +
+          `published by Sentora, paid in ${v.asset} and claimable at term end ` +
+          `(${v.endsOn}). Early withdrawal forfeits accrued rewards.`,
     });
   }
   pools.sort((a, b) => (b.tvlUSD || 0) - (a.tvlUSD || 0));
@@ -635,8 +652,11 @@ async function fetchSentora() {
     totalTvlUSD: totalTvl,
     poolsShown: pools.length,
     poolsTotal: SENTORA_VAULTS.length,
-    hasApyData: true,
-    apyNote: "Reward rates are published by Sentora (the curator) and quoted here as-is; they are not derived on-chain.",
+    hasApyData: pools.some((p) => p.apy != null),
+    apyNote: SENTORA_VAULTS.every((v) => sentoraCampaignEnded(v))
+      ? "Sentora's campaigns have ended, so new deposits earn no reward until Sentora opens another. " +
+        "Rewards earned in them are claimable on the Stellar DeFi Hub."
+      : "Reward rates are published by Sentora (the curator) and quoted here as-is; they are not derived on-chain.",
     metricLabel: "Total TVL",
     pools,
   };
